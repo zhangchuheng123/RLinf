@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EMBODIED_PATH="$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd )"
+export EMBODIED_PATH="$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd )"
 REPO_PATH=$(dirname $(dirname "$EMBODIED_PATH"))
 SRC_FILE="${EMBODIED_PATH}/train_embodied_agent.py"
 
