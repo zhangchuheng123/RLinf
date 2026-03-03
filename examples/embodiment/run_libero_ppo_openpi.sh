@@ -9,6 +9,8 @@ export MUJOCO_GL="egl"
 export PYOPENGL_PLATFORM="egl"
 export ROBOT_PLATFORM="LIBERO"
 export PYTHONPATH="${REPO_PATH}"
+export RAY_OVERRIDE_RUNTIME_ENV_DEFAULT_EXCLUDES=""
+export RAY_RUNTIME_ENV_WORKING_DIR_EXCLUDES=".git,.venv"
 
 # Hard-coded training config (Pi0.5 + LIBERO + PPO).
 CONFIG_NAME="libero_10_ppo_openpi_pi05"
