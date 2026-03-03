@@ -74,6 +74,7 @@ class LiberoEnv(gym.Env):
         self.current_raw_obs = None
 
     def _init_env(self):
+        # TODO: LIBERO OffScreenRenderEnv workers are created here.
         env_fns = self.get_env_fns()
         self.env = ReconfigureSubprocEnv(env_fns)
 
@@ -102,6 +103,7 @@ class LiberoEnv(gym.Env):
             if env_id not in env_idx:
                 task_descriptions.append(self.task_descriptions[env_id])
                 continue
+            # TODO: Task selection for LIBERO suite happens here.
             task = self.task_suite.get_task(self.task_ids[env_id])
             task_bddl_file = os.path.join(
                 get_libero_path("bddl_files"), task.problem_folder, task.bddl_file

@@ -96,6 +96,7 @@ class MultiStepRolloutWorker(Worker):
             rollout_model_config.precision = self.cfg.rollout.model.precision
             rollout_model_config.model_path = self.cfg.rollout.model.model_path
 
+        # TODO: Pi0.5 rollout model loads here for trajectory generation.
         self.hf_model: BasePolicy = get_model(rollout_model_config)
 
         if self.cfg.runner.get("ckpt_path", None):
@@ -227,6 +228,7 @@ class MultiStepRolloutWorker(Worker):
         ]:
             kwargs["return_obs"] = not hasattr(self.hf_model, "q_head")
 
+        # TODO: Action sampling for LIBERO happens in predict_action_batch().
         with torch.no_grad():
             actions, result = self.hf_model.predict_action_batch(
                 env_obs=env_obs,

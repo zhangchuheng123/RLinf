@@ -49,17 +49,20 @@ def main(cfg) -> None:
         from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
 
         actor_worker_cls = EmbodiedFSDPActor
+    # TODO: Actor worker loads the Pi0.5 model and runs PPO updates for LIBERO.
     actor_group = actor_worker_cls.create_group(cfg).launch(
         cluster, name=cfg.actor.group_name, placement_strategy=actor_placement
     )
     # Create rollout worker group
     rollout_placement = component_placement.get_strategy("rollout")
+    # TODO: Rollout worker runs policy inference to collect trajectories.
     rollout_group = MultiStepRolloutWorker.create_group(cfg).launch(
         cluster, name=cfg.rollout.group_name, placement_strategy=rollout_placement
     )
 
     # Create env worker group
     env_placement = component_placement.get_strategy("env")
+    # TODO: Env worker hosts LIBERO envs and returns observations/rewards.
     env_group = EnvWorker.create_group(cfg).launch(
         cluster, name=cfg.env.group_name, placement_strategy=env_placement
     )

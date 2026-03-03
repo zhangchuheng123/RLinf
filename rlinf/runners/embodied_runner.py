@@ -167,6 +167,8 @@ class EmbodiedRunner:
                     if _step % self.weight_sync_interval == 0:
                         self.update_rollout_weights()
                 with self.timer("generate_rollouts"):
+                    self.logger.info("Step %s: start rollout collection.", self.global_step)
+                    # TODO: LIBERO trajectory collection happens in env+rollout here.
                     env_handle: Handle = self.env.interact(
                         input_channel=self.rollout_channel,
                         output_channel=self.env_channel,
@@ -180,17 +182,24 @@ class EmbodiedRunner:
                         input_channel=self.actor_channel
                     ).wait()
                     rollout_handle.wait()
+                    self.logger.info("Step %s: rollout collection done.", self.global_step)
 
                 # compute advantages and returns.
                 with self.timer("cal_adv_and_returns"):
+                    self.logger.info("Step %s: compute advantages/returns.", self.global_step)
+                    # TODO: PPO advantage/return computation happens here.
                     actor_rollout_metrics = (
                         self.actor.compute_advantages_and_returns().wait()
                     )
+                    self.logger.info("Step %s: advantages/returns done.", self.global_step)
 
                 # actor training.
+                # TODO: PPO policy/value updates happen inside this call.
+                self.logger.info("Step %s: start PPO training.", self.global_step)
                 actor_training_handle: Handle = self.actor.run_training()
 
                 actor_training_metrics = actor_training_handle.wait()
+                self.logger.info("Step %s: PPO training done.", self.global_step)
 
                 self.global_step += 1
 

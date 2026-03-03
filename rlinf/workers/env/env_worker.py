@@ -90,6 +90,7 @@ class EnvWorker(Worker):
             )
         self.log_info(f"Env worker initialized with dst_ranks: {self.dst_ranks}")
         self.log_info(f"Env worker initialized with src_ranks: {self.src_ranks}")
+        # TODO: LIBERO env class is selected here.
         train_env_cls = get_env_cls(self.cfg.env.train.env_type, self.cfg.env.train)
         eval_env_cls = get_env_cls(self.cfg.env.eval.env_type, self.cfg.env.eval)
 
@@ -102,6 +103,7 @@ class EnvWorker(Worker):
 
         if not self.only_eval:
             for stage_id in range(self.stage_num):
+                # TODO: Each stage creates a LIBERO vector env for rollout collection.
                 env = train_env_cls(
                     cfg=self.cfg.env.train,
                     num_envs=self.train_num_envs_per_stage,
@@ -179,6 +181,7 @@ class EnvWorker(Worker):
         """
         This function is used to interact with the environment.
         """
+        # TODO: Action post-processing for LIBERO happens here.
         chunk_actions = prepare_actions(
             raw_chunk_actions=chunk_actions,
             env_type=self.cfg.env.train.env_type,

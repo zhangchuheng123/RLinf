@@ -214,6 +214,7 @@ class FSDPActor(FSDPModelManager, Worker):
         If mode is disaggregated, setup which inference ranks it needs to sync weights to by
         doing a handshake with inference workers.
         """
+        # TODO: Model loading + FSDP setup for Pi0.5 happens in setup_model_and_optimizer().
         self.setup_model_and_optimizer()
         if (
             self.kl_beta > 0 or self.reinpp_kl_beta > 0
