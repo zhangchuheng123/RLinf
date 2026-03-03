@@ -39,7 +39,6 @@ wandb:
   key: "local-fb872608a0ec758c86ab35d24eec1373fe2d9313"
   host: "https://microsoft-research.wandb.io"
   entity: msra_rl
-  project: igor_policy_finetuning
   project: rlinf
   run: ${runner.logger.experiment_name}
 
