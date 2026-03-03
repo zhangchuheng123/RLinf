@@ -36,6 +36,7 @@ class MetricLogger:
 
     def __init__(self, cfg: DictConfig):
         logger_cfg = cfg.runner.logger
+        wandb_cfg = cfg.wandb
 
         log_path = logger_cfg.get("log_path", "logs")
         project_name = logger_cfg.get("project_name", "rlinf")
@@ -62,16 +63,35 @@ class MetricLogger:
         if "wandb" in self.logger_backends:
             import wandb
 
+            from rlinf.utils.logging import get_logger
+
             wandb_log_path = os.path.join(log_path, "wandb")
             os.makedirs(wandb_log_path, exist_ok=True)
+
+            wandb_entity = wandb_cfg.entity
+            wandb_project = wandb_cfg.project
+            wandb_run = wandb_cfg.run
+            wandb_key = wandb_cfg.key
+            wandb_host = wandb_cfg.host
+            wandb_id = wandb_run
+
+            logger = get_logger()
+            logger.info(
+                "Wandb login and init... run_name=%s id=%s", wandb_run, wandb_id
+            )
 
             settings = None
             if wandb_proxy:
                 settings = wandb.Settings(https_proxy=wandb_proxy)
+
+            wandb.login(key=wandb_key, host=wandb_host)
             wandb.init(
-                project=project_name,
-                name=experiment_name,
+                entity=wandb_entity,
+                project=wandb_project,
+                name=wandb_run,
                 config=config,
+                id=wandb_id,
+                resume="allow",
                 settings=settings,
                 dir=wandb_log_path,
             )

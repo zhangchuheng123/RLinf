@@ -23,7 +23,7 @@ runner:
     log_path: "../results"
     project_name: rlinf
     experiment_name: "libero_10_ppo_openpi_pi05"
-    logger_backends: ["tensorboard"] # wandb, swanlab
+    logger_backends: ["tensorboard", "wandb"] # wandb, swanlab
 
   max_epochs: 1000
   max_steps: -1
@@ -34,6 +34,14 @@ runner:
 
   resume_dir: null # Optional: path to a saved checkpoint directory, such as 'checkpoints/global_step_10'. If not None, it will be used to resume training.
   ckpt_path: null  # Optional: path to a .pt checkpoint. If not None, it will be loaded after the model is instantiated (for evaluation).
+
+wandb:
+  key: "local-fb872608a0ec758c86ab35d24eec1373fe2d9313"
+  host: "https://microsoft-research.wandb.io"
+  entity: msra_rl
+  project: igor_policy_finetuning
+  project: rlinf
+  run: ${runner.logger.experiment_name}
 
 algorithm:
 

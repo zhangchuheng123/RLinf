@@ -523,6 +523,22 @@ class EnvWorker(Worker):
         for key, value in env_metrics.items():
             env_metrics[key] = torch.cat(value, dim=0).contiguous().cpu()
 
+        if "success_once" in env_metrics:
+            success_rate = env_metrics["success_once"].float().mean().item()
+            env_metrics["success_rate"] = torch.tensor([success_rate])
+
+        if "task_id" in env_metrics and "success_once" in env_metrics:
+            task_ids = env_metrics["task_id"].long()
+            success_once = env_metrics["success_once"].float()
+            for task_id in torch.unique(task_ids):
+                mask = task_ids == task_id
+                if mask.any():
+                    task_rate = success_once[mask].mean().item()
+                    env_metrics[f"success_rate_task_{int(task_id)}"] = torch.tensor(
+                        [task_rate]
+                    )
+            del env_metrics["task_id"]
+
         return env_metrics
 
     def evaluate(self, input_channel: Channel, output_channel: Channel):

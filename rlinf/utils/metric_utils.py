@@ -15,6 +15,8 @@
 import math
 import time
 
+from tqdm import tqdm
+
 import torch
 import torch.distributed
 
@@ -179,6 +181,9 @@ def print_metrics_table(
     step: int, total_steps: int, start_time: float, metrics: dict, start_step: int = 0
 ):
     """Print training metrics in a simple, fast formatted table."""
+    def _write(line: str = "") -> None:
+        tqdm.write(line)
+
     # Calculate progress info
     progress = (step + 1) / total_steps * 100
     elapsed_time = time.time() - start_time
@@ -222,9 +227,10 @@ def print_metrics_table(
         padding = total_width - 2 - len(title_text)
         left = padding // 2
         right = padding - left
-        print(f"├{'─' * left}{title_text}{'─' * right}┤")
+        _write(f"├{'─' * left}{title_text}{'─' * right}┤")
 
-    print(f"\n╭{'─' * (total_width - 2)}╮")
+    _write()
+    _write(f"╭{'─' * (total_width - 2)}╮")
     _print_section_title("Metric Table")
 
     # First line: Global Step and Progress
@@ -232,7 +238,7 @@ def print_metrics_table(
     progress_str = f"Progress: {bar} │ {progress:5.1f}%"
     line1 = f"│ {step_str} │ {progress_str}"
     line1 = _fit_line(line1, total_width - 2)
-    print(f"{line1} │")
+    _write(f"{line1} │")
 
     # Second line: Time information
     elapsed_str_formatted = f"Elapsed: {elapsed_str}"
@@ -240,7 +246,7 @@ def print_metrics_table(
     step_time_str = f"Step Time: {elapsed_time / steps_done:.3f}s"
     line2 = f"│ {elapsed_str_formatted} │ {eta_str_formatted} │ {step_time_str}"
     line2 = _fit_line(line2, total_width - 2)
-    print(f"{line2} │")
+    _write(f"{line2} │")
 
     # Group metrics by category
     categories = {
@@ -292,7 +298,7 @@ def print_metrics_table(
         if category_metrics:
             _print_section_title(category_name)
             # Blank line before metrics (except Global Step section, which is separate)
-            print(f"│{' ' * (table_width - 2)}│")
+            _write(f"│{' ' * (table_width - 2)}│")
 
             # Sort metrics for consistent output
             sorted_metrics = sorted(category_metrics.items())
@@ -331,12 +337,11 @@ def print_metrics_table(
                     f"│{_fit_cell(row_metrics[1], col_widths[1])}"
                     f"│{_fit_cell(row_metrics[2], col_widths[2])}│"
                 )
-                print(line)
+                _write(line)
 
             # Section separator (minimal)
-            print(f"│{' ' * (table_width - 2)}│")
+            _write(f"│{' ' * (table_width - 2)}│")
 
     # Bottom border
-    print(f"╰{'─' * (table_width - 2)}╯")
-
-    print()
+    _write(f"╰{'─' * (table_width - 2)}╯")
+    _write()
