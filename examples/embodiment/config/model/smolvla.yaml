@@ -1,0 +1,23 @@
+model_type: "smolvla"
+
+# Model path - set in the experiment-specific config file
+model_path: "/path/to/model/smolvla"
+
+precision: "bf16"
+is_lora: False
+
+# Action and chunk settings
+action_dim: 7          # LIBERO 7-DoF: dx, dy, dz, droll, dpitch, dyaw, gripper
+num_action_chunks: 16  # action steps executed per policy call (must divide max_steps_per_rollout_epoch)
+
+# Value head for actor-critic (PPO)
+add_value_head: False
+state_dim: 9           # proprioceptive state dimension fed to the value head
+
+# Observation key mapping (lerobot batch format → env_obs dict keys)
+# image_keys is auto-detected from policy.config.image_features at load time.
+# Only set this to override the detected value, e.g.:
+#   image_keys: ["top"]   →  observation.images.top
+# image_keys: []
+main_image_env_key: "main_images"
+# wrist_image_env_key: "wrist_images"  # uncomment to add the wrist camera

@@ -11,3 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import torch
+from omegaconf import DictConfig
+
+
+def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
+    from rlinf.models.embodiment.smolvla.smolvla_policy import (
+        SmolVLAForRLActionPrediction,
+    )
+
+    model = SmolVLAForRLActionPrediction(cfg)
+    model.to(torch_dtype)
+    return model

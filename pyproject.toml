@@ -109,6 +109,7 @@ embodied = [
     "imageio[ffmpeg]",
     "gymnasium",
     "gym",
+    "lerobot",
 ]
 franka = [
     "pyyaml",
