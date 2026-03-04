@@ -104,12 +104,12 @@ agentic-vllm = [
 ]
 embodied = [
     "transformers<=4.57.6",
-    "peft",
+    "peft>=0.17.0",
     "timm",
     "imageio[ffmpeg]",
     "gymnasium",
     "gym",
-    "lerobot",
+    "lerobot[smolvla]",
 ]
 franka = [
     "pyyaml",
@@ -145,7 +145,6 @@ override-dependencies = [
     "tensorflow-addons==0.23.0",
     "setuptools>=69.5.1,<75.9",
     "datasets==3.6.0",
-    "peft==0.11.1",
 ]
 
 [tool.setuptools]

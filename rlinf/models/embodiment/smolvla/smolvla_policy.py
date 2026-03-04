@@ -78,7 +78,7 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
 
     def __init__(self, cfg: DictConfig) -> None:
         nn.Module.__init__(self)
-        from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+        from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
         self.policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
         self.action_dim = cfg.action_dim
@@ -217,11 +217,19 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
 
         result = self.policy.forward(batch)
 
-        raw_loss = result.get("loss", result.get("l2_loss"))
+        # SmolVLAPolicy.forward() returns (loss, outputs) tuple.
+        # loss is a scalar or [B] / [B, chunk, action_dim] tensor.
+        if isinstance(result, tuple):
+            raw_loss = result[0]
+        elif isinstance(result, dict):
+            raw_loss = result.get("loss", result.get("l2_loss"))
+        else:
+            raw_loss = result
+
         if raw_loss is None:
-            raise KeyError(
-                "SmolVLAPolicy.forward() returned neither 'loss' nor 'l2_loss'. "
-                f"Available keys: {list(result.keys())}"
+            raise ValueError(
+                "SmolVLAPolicy.forward() did not return a usable loss. "
+                f"Got: {type(result)}"
             )
 
         # Return per-chunk log_prob [B, chunk] summed over action_dim.
