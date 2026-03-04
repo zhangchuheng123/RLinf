@@ -14,6 +14,9 @@
 
 import os
 
+import numpy as np
+import torch
+
 from omegaconf import DictConfig, OmegaConf
 
 
@@ -122,6 +125,7 @@ class MetricLogger:
             self.logger["tensorboard"] = _TensorboardLogger(tensorboard_log_path)
 
     def log(self, data, step, backend=None):
+        data = self._sanitize_metrics(data)
         for default_backend, logger_instance in self.logger.items():
             if backend is None or default_backend in backend:
                 logger_instance.log(data=data, step=step)
@@ -139,3 +143,20 @@ class MetricLogger:
     def finish(self):
         for logger_instance in self.logger.values():
             logger_instance.finish()
+
+    @staticmethod
+    def _sanitize_metrics(data: dict) -> dict:
+        sanitized = {}
+        for key, value in data.items():
+            if isinstance(value, torch.Tensor):
+                if value.numel() == 1:
+                    sanitized[key] = value.detach().cpu().item()
+                else:
+                    sanitized[key] = value.detach().float().mean().cpu().item()
+            elif isinstance(value, np.ndarray):
+                sanitized[key] = float(value.mean()) if value.size else 0.0
+            elif isinstance(value, np.generic):
+                sanitized[key] = value.item()
+            else:
+                sanitized[key] = value
+        return sanitized

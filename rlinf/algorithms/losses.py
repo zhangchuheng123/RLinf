@@ -180,6 +180,7 @@ def compute_ppo_actor_loss(
     clip_log_ratio_max: Optional[float] = None,
     **kwargs,
 ) -> tuple[torch.Tensor, dict]:
+    # TODO: PPO actor loss (policy ratio clipping) is computed here.
     """
     Compute PPO actor loss function.
 
@@ -305,6 +306,7 @@ def compute_ppo_critic_loss(
     loss_mask_sum: Optional[torch.Tensor] = None,
     **kwargs,
 ) -> tuple[torch.Tensor, dict]:
+    # TODO: PPO critic loss (value clipping + Huber) is computed here.
     """
     Compute PPO critic loss function.
 
@@ -387,6 +389,7 @@ def compute_decoupled_ppo_actor_critic_loss(**kwargs) -> tuple[torch.Tensor, dic
 
 @register_policy_loss("actor_critic")
 def compute_ppo_actor_critic_loss(**kwargs) -> tuple[torch.Tensor, dict]:
+    # TODO: PPO actor+critic loss aggregation happens here.
     """
     Compute PPO actor loss function.
 

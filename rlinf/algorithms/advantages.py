@@ -33,6 +33,7 @@ def compute_gae_advantages_and_returns(
     dones: Optional[torch.Tensor] = None,
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    # TODO: PPO advantage/return computation (GAE) happens here.
     """
     Calculate advantages and returns for Proximal Policy Optimization (PPO).
     NOTE: currently this function does not support auto-reset.

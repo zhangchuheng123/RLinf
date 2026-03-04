@@ -1,0 +1,118 @@
+# Docs: https://amulet-docs.azurewebsites.net/main/setup.html
+
+#   az login
+#   amlt project checkout IGOR lightaml3149727845 chuhengzhang
+#   amlt target add-defaults gcr
+#   amlt target add --subscription 3f2ab3f5-468d-4ba7-bc14-9d3a9da4bcc5 --resource-group GCRArcK8sAMLProd2 --workspace-name gcrarck8s4ws2
+#   amlt target add --subscription 1584df91-d540-4cd3-a9ca-24ff3dc95ba7 --resource-group UKSouth --workspace-name DRL-AML
+#   amlt target add --subscription 1584df91-d540-4cd3-a9ca-24ff3dc95ba7 --resource-group WestUS3 --workspace-name Light-AML
+#   amlt target add --subscription 1584df91-d540-4cd3-a9ca-24ff3dc95ba7 --resource-group JapanEast --workspace-name BonusAML 
+#   amlt target add --subscription 1584df91-d540-4cd3-a9ca-24ff3dc95ba7 --resource-group eastus_2 --workspace-name FastAML
+#   amlt target info aml
+#   amlt project create IGOR fastaml0167939705 chuhengzhang
+#   amlt project checkout IGOR fastaml0167939705 chuhengzhang
+#   amlt metadata-download exp60
+
+# Submit using the following commands
+#   amlt storage upload --config-file amlt_h.yaml 
+#   amlt run 260210_fm_distill_Lf2h2_300k_2401till2501.yaml 260210_fm_distill_Lf2h2_300k_2401till2501_AtariH200
+
+description: PolicyFinetuning
+
+# target:
+#   service: sing
+#   name: palisades33
+#   workspace_name: workspace-msra-ml-miic-sg-oc
+
+target:
+  service: aml
+  name: AtariH200
+  # service: sing
+  # # run "amlt target list amlk8s" to list the names of available AMLK8s targets
+  # # name: lightcluster  # 2xH100
+  # # name: bonuscluster
+  # # name: rushcluster # 2xH100
+  # # name: rush8A100
+  # name: fast202
+  # # name: fastcluster # 2xH100
+  # # name: whitney09
+  # name: whitney03
+  # workspace_name: RushAML
+
+# environment:
+#   image: amlt-sing/acpt-torch2.7.1-py3.10-cuda12.6-ubuntu22.04
+
+environment:
+  image: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+  registry: docker.io # any public registry can be specified here
+  # image: amlt-sing/acpt-rocm6.1_ubuntu20.04_py3.9_pytorch2.1.2
+  # image: rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0
+  # image: guojunll/nvidia-2401-igor:xformers
+  # registry: docker.io # any public registry can be specified here
+ 
+code:
+  # local directory of the code. this will be uploaded to the server.
+  # $CONFIG_DIR is expanded to the directory of this config file
+  local_dir: $CONFIG_DIR/../
+  ignore:
+  - runs/
+  - log/
+  - visualization/
+  - wandb/
+  - local_tmp_log/
+  - .venv/
+ 
+storage:
+  output:
+    # storage_account_name: lightaml3149727845
+    # storage_account_name: bonusaml4242345487
+    storage_account_name: fastaml0167939705
+    # storage_account_name: rushaml2996082614
+    # storage_account_name: {storage_account_name}
+    container_name: chuheng
+  external:
+    storage_account_name: fastaml0167939705
+    # storage_account_name: lightaml3149727845
+    # storage_account_name: bonusaml4242345487
+    # storage_account_name: lightaml3149727845
+    # storage_account_name: rushaml2996082614
+    # storage_account_name: {storage_account_name}
+    container_name: chuheng
+    # container_name: sharedcontainer
+    mount_dir: /mnt/chuheng_data
+ 
+jobs:
+- name: job-260210_fm_distill_Lf2h2_300k_2401till2501_AtariH200
+  sku: C1
+  identity: managed
+  sla_tier: Premium
+  priority: high
+  command:
+  - echo "Experiment Started!"
+  - pwd
+  - nvidia-smi
+  - apt-get update
+  - apt-get install build-essential -y
+  - apt-get install git ffmpeg libsm6 libxext6 jq -y
+  - pip install uv
+  - uv sync
+  - VLA_EXP_NAME="260210_fm_distill_Lf2h2_300k_2401till2501_AtariH200"
+    VLA_LOG_DIR="/mnt/chuheng_data/exp_human"
+    PALIGEMMA_CACHE="/mnt/chuheng_data/dataset_tf_pi/paligemma-3b-pt-224/paligemma-3b-pt-224"
+    VLA_DATA_DIR=""
+    INFERENCE_CHECKPOINT=""
+    HYDRA_FULL_ERROR=1
+    TOKENIZERS_PARALLELISM=true
+    uv run torchrun 
+      --nnodes=1 
+      --nproc_per_node=8
+      --standalone 
+      scripts/run.py 
+      --config-name=260210_fm_distill_Lf2h2_300k_2401till2501
+  submit_args:
+      env:
+        AMLT_DIRSYNC_MOVE: true
+        SHARED_MEMORY_PERCENT: 0.9
+        _AZUREML_SINGULARITY_JOB_UAI: /subscriptions/1584df91-d540-4cd3-a9ca-24ff3dc95ba7/resourcegroups/Identity/providers/Microsoft.ManagedIdentity/userAssignedIdentities/RL-job-Identity
+      container_args:
+        shm_size: 2048g

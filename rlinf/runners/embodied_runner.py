@@ -259,6 +259,7 @@ class EmbodiedRunner:
             self.metric_logger.log(rollout_metrics, _step)
             self.metric_logger.log(time_metrics, _step)
             self.metric_logger.log(training_metrics, _step)
+            self.logger.info("Step %s: metrics logged.", self.global_step)
 
             logging_metrics = time_metrics
             logging_metrics.update(eval_metrics)

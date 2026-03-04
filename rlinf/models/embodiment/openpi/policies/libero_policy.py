@@ -54,6 +54,7 @@ class LiberoInputs(transforms.DataTransformFn):
     model_type: _model.ModelType
 
     def __call__(self, data: dict) -> dict:
+        # TODO: Pi0.5 input mapping for LIBERO (state/images/prompt -> model input) happens here.
         # Possibly need to parse images to uint8 (H,W,C) since LeRobot automatically
         # stores as float32 (C,H,W), gets skipped for policy inference.
         # Keep this for your own dataset, but if your dataset stores the images
@@ -111,6 +112,7 @@ class LiberoOutputs(transforms.DataTransformFn):
     """
 
     def __call__(self, data: dict) -> dict:
+        # TODO: Pi0.5 output mapping for LIBERO (model actions -> env actions) happens here.
         # Only return the first N actions -- since we padded actions above to fit the model action
         # dimension, we need to now parse out the correct number of actions in the return dict.
         # For Libero, we only return the first 7 actions (since the rest is padding).

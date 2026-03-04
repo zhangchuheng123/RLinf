@@ -125,6 +125,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         self,
         config: OpenPi0Config,
     ):
+        # TODO: Pi0.5 network structure (value head / noise head / DSRL heads) is built here.
         # Override `sample_actions` to prevent parent class polymorphic call
         sample_actions_func = self.sample_actions
         super().__init__(config)
@@ -416,6 +417,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         compute_values=True,
         **kwargs,
     ) -> tuple[np.ndarray, dict[str, Any]]:
+        # TODO: Pi0.5 input/output interface: env_obs -> model input -> actions + prev_logprobs/values.
         to_process_obs = self.obs_processor(env_obs)  # env obs -> policy input obs
         processed_obs = self.input_transform(
             to_process_obs, transpose=False

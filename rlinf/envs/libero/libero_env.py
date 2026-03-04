@@ -47,6 +47,7 @@ class LiberoEnv(gym.Env):
         self.num_group = self.num_envs // self.group_size
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
         self.specific_reset_id = cfg.get("specific_reset_id", None)
+        self.specific_task_id = cfg.get("specific_task_id", None)
 
         self.ignore_terminations = cfg.ignore_terminations
         self.auto_reset = cfg.auto_reset
@@ -58,6 +59,18 @@ class LiberoEnv(gym.Env):
         self.task_suite: Benchmark = get_benchmark_overridden(cfg.task_suite_name)()
 
         self._compute_total_num_group_envs()
+
+        if self.specific_task_id is not None:
+            tid = self.specific_task_id
+            assert 0 <= tid < len(self.cumsum_trial_id_bins), (
+                f"specific_task_id={tid} out of range [0, {len(self.cumsum_trial_id_bins)})"
+            )
+            self._task_reset_start = int(self.cumsum_trial_id_bins[tid - 1]) if tid > 0 else 0
+            self._task_reset_end = int(self.cumsum_trial_id_bins[tid])
+        else:
+            self._task_reset_start = 0
+            self._task_reset_end = self.total_num_group_envs
+
         self.reset_state_ids_all = self.get_reset_state_ids_all()
         self.update_reset_state_ids()
         self._init_task_and_trial_ids()
@@ -147,12 +160,12 @@ class LiberoEnv(gym.Env):
             )
         else:
             reset_state_ids = self._generator.integers(
-                low=0, high=self.total_num_group_envs, size=(num_reset_states,)
+                low=self._task_reset_start, high=self._task_reset_end, size=(num_reset_states,)
             )
         return reset_state_ids
 
     def get_reset_state_ids_all(self):
-        reset_state_ids = np.arange(self.total_num_group_envs)
+        reset_state_ids = np.arange(self._task_reset_start, self._task_reset_end)
         valid_size = len(reset_state_ids) - (
             len(reset_state_ids) % self.total_num_processes
         )
