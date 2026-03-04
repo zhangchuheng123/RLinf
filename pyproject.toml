@@ -110,6 +110,7 @@ embodied = [
     "gymnasium",
     "gym",
     "lerobot[smolvla]",
+    "num2words",
 ]
 franka = [
     "pyyaml",
