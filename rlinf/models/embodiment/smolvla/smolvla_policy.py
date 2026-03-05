@@ -246,20 +246,19 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         if self._has_triggered_debug_pause:
             return
 
-        continue_file = self._debug_dump_dir / "CONTINUE_SELECT_ACTION"
-        logging.info(
-            "[SmolVLA][debug] Paused before select_action. "
-            "Create file to continue: %s",
-            continue_file,
-        )
-        while not continue_file.exists():
-            time.sleep(1.0)
+        try:
+            from ray.util.rpdb import set_trace as ray_set_trace
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to import ray.util.rpdb for in-worker pdb debugging."
+            ) from exc
 
         logging.info(
-            "[SmolVLA][debug] Continue marker detected, resume select_action: %s",
-            continue_file,
+            "[SmolVLA][debug] Entering Ray remote pdb before select_action. "
+            "Use `ray debug` in another terminal to attach."
         )
         self._has_triggered_debug_pause = True
+        ray_set_trace()
 
     # ------------------------------------------------------------------
     # Flow-matching log-prob
