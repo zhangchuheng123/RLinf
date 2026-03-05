@@ -74,7 +74,7 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
                                              (default None)
     """
 
-    _no_split_modules = ["SmolVLAModel", "ValueHead"]
+    _no_split_modules = ["LlamaDecoderLayer", "SmolVLMEncoderLayer"]
 
     def __init__(self, cfg: DictConfig, policy=None) -> None:
         nn.Module.__init__(self)
