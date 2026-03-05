@@ -38,5 +38,18 @@ bash examples/embodiment/run_libero_ppo_openpi_pi0.sh
 rm -rf .venv
 bash requirements/install.sh embodied --model smolvla --env maniskill_libero
 uv run --no-sync hf download HuggingFaceVLA/smolvla_libero --local-dir ./models/smolvla_libero
+# Verify model config exists
+test -f ./models/smolvla_libero/config.json
+# Verify normalization stats exists (legacy stats.* or lerobot normalizer processor file)
+bash -lc '[[ -f ./models/smolvla_libero/stats.safetensors || -f ./models/smolvla_libero/dataset_stats.safetensors || -f ./models/smolvla_libero/stats.json || -f ./models/smolvla_libero/dataset_stats.json || -n "$(compgen -G "./models/smolvla_libero/policy_preprocessor_step_*_normalizer_processor.safetensors")" ]]'
 bash examples/embodiment/run_libero_ppo_smolvla.sh
 ```
+
+If you see:
+
+```text
+AssertionError: `mean` is infinity. You should either initialize with `stats` as an argument, or use a pretrained model.
+```
+
+The SmolVLA checkpoint is missing or failed to load normalization stats.
+Use a complete pretrained checkpoint directory (with stats files) as `MODEL_PATH`.

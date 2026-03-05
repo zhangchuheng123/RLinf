@@ -50,6 +50,58 @@ from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.models.embodiment.modules.value_head import ValueHead
 
 
+def assert_smolvla_normalization_stats_initialized(
+    policy: nn.Module, model_path: str
+) -> None:
+    """Assert SmolVLA normalization statistics are present and finite.
+
+    LeRobot initializes missing stats with infinities. If checkpoint stats are not
+    loaded, rollout later fails with:
+      AssertionError: `mean` is infinity.
+
+    We fail fast at model construction with a clearer message.
+    """
+    stat_name_tokens = ("mean", "std", "min", "max")
+    module_names = ("normalize_inputs", "normalize_targets")
+
+    checked_stats: list[str] = []
+    bad_stats: list[str] = []
+
+    for module_name in module_names:
+        module = getattr(policy, module_name, None)
+        if module is None:
+            continue
+
+        for stat_name, stat_value in module.named_buffers(recurse=True):
+            if not stat_value.is_floating_point():
+                continue
+            lower_name = stat_name.lower()
+            if not any(token in lower_name for token in stat_name_tokens):
+                continue
+
+            checked_stats.append(f"{module_name}.{stat_name}")
+            if not torch.isfinite(stat_value).all():
+                bad_stats.append(f"{module_name}.{stat_name}")
+
+    if not checked_stats:
+        raise AssertionError(
+            "SmolVLA policy does not expose normalization statistic buffers under "
+            "`normalize_inputs`/`normalize_targets`. "
+            "Cannot verify checkpoint integrity. "
+            f"model_path={model_path}"
+        )
+
+    if bad_stats:
+        preview = ", ".join(bad_stats[:8])
+        raise AssertionError(
+            "Detected non-finite SmolVLA normalization stats "
+            f"({preview}). This usually means checkpoint statistics were not loaded. "
+            "Use a pretrained SmolVLA checkpoint that includes normalization stats "
+            "and verify the model directory is complete. "
+            f"model_path={model_path}"
+        )
+
+
 class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
     """SmolVLA wrapper for PPO-based RL (actor-critic).
 
@@ -86,6 +138,8 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
             from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
             self.policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
+
+        assert_smolvla_normalization_stats_initialized(self.policy, cfg.model_path)
 
         self.action_dim = cfg.action_dim
         self.num_action_chunks = cfg.num_action_chunks

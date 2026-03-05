@@ -21,7 +21,27 @@ uv run --no-sync ray stop --force 2>/dev/null || true
 
 # Hard-coded training config (SmolVLA + LIBERO-10 + PPO).
 CONFIG_NAME="libero_10_ppo_smolvla"
-MODEL_PATH="${REPO_PATH}/models/smolvla_libero"
+MODEL_PATH="${MODEL_PATH:-${REPO_PATH}/models/smolvla_libero}"
+
+if [[ ! -d "${MODEL_PATH}" ]]; then
+  echo "[ERROR] SmolVLA model directory not found: ${MODEL_PATH}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${MODEL_PATH}/config.json" ]]; then
+  echo "[ERROR] Missing config.json in SmolVLA model directory: ${MODEL_PATH}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${MODEL_PATH}/stats.safetensors" \
+      && ! -f "${MODEL_PATH}/dataset_stats.safetensors" \
+      && ! -f "${MODEL_PATH}/stats.json" \
+      && ! -f "${MODEL_PATH}/dataset_stats.json" \
+      && -z "$(compgen -G "${MODEL_PATH}/policy_preprocessor_step_*_normalizer_processor.safetensors")" ]]; then
+  echo "[ERROR] Missing normalization stats in SmolVLA model directory: ${MODEL_PATH}" >&2
+  echo "[ERROR] Expected one of: stats.safetensors, dataset_stats.safetensors, stats.json, dataset_stats.json, policy_preprocessor_step_*_normalizer_processor.safetensors" >&2
+  exit 1
+fi
 
 # Single A100 80G friendly defaults.
 TRAIN_ENVS=16
