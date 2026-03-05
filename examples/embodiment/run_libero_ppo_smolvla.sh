@@ -11,6 +11,9 @@ export ROBOT_PLATFORM="LIBERO"
 export PYTHONPATH="${REPO_PATH}"
 export RAY_OVERRIDE_RUNTIME_ENV_DEFAULT_EXCLUDES=""
 export RAY_RUNTIME_ENV_WORKING_DIR_EXCLUDES=".git,.venv"
+# Tell uv to always use this venv's absolute path, so Ray workers spawned in
+# a temp working directory don't create a fresh empty venv and lose all packages.
+export UV_PROJECT_ENVIRONMENT="${REPO_PATH}/.venv"
 
 # Stop any stale Ray cluster from a previous run so workers pick up the
 # current venv's Python environment cleanly.
