@@ -24,7 +24,6 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
 
     from rlinf.models.embodiment.smolvla.smolvla_policy import (
         SmolVLAForRLActionPrediction,
-        assert_smolvla_normalization_stats_initialized,
     )
 
     # ---- Step 1: build architecture (random init, CPU) ----
@@ -48,8 +47,6 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
         policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
     finally:
         SmolVLMWithExpertModel.__init__ = _orig_init
-
-    assert_smolvla_normalization_stats_initialized(policy, cfg.model_path)
 
     # ---- Step 2: wrap in RL model (value head, etc.) ----
     model = SmolVLAForRLActionPrediction(cfg, policy=policy)

@@ -40,7 +40,10 @@ RLinf LIBERO environment provides:
 
 from typing import Any, Literal
 from pathlib import Path
-import json
+import importlib
+import os
+import pickle
+import time
 import logging
 
 import numpy as np
@@ -50,148 +53,6 @@ from omegaconf import DictConfig
 
 from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.models.embodiment.modules.value_head import ValueHead
-
-
-def assert_smolvla_normalization_stats_initialized(
-    policy: nn.Module, model_path: str
-) -> None:
-    """Assert SmolVLA normalization statistics are present and finite.
-
-    LeRobot initializes missing stats with infinities. If checkpoint stats are not
-    loaded, rollout later fails with:
-      AssertionError: `mean` is infinity.
-
-    We fail fast at model construction with a clearer message.
-    """
-    stat_name_tokens = ("mean", "std", "min", "max")
-    module_names = ("normalize_inputs", "normalize_targets")
-
-    checked_stats: list[str] = []
-    bad_stats: list[str] = []
-
-    for module_name in module_names:
-        module = getattr(policy, module_name, None)
-        if module is None:
-            continue
-
-        for stat_name, stat_value in module.named_buffers(recurse=True):
-            if not stat_value.is_floating_point():
-                continue
-            lower_name = stat_name.lower()
-            if not any(token in lower_name for token in stat_name_tokens):
-                continue
-
-            checked_stats.append(f"{module_name}.{stat_name}")
-            if not torch.isfinite(stat_value).all():
-                bad_stats.append(f"{module_name}.{stat_name}")
-
-    if checked_stats and bad_stats:
-        preview = ", ".join(bad_stats[:8])
-        raise AssertionError(
-            "Detected non-finite SmolVLA normalization stats "
-            f"({preview}). This usually means checkpoint statistics were not loaded. "
-            "Use a pretrained SmolVLA checkpoint that includes normalization stats "
-            "and verify the model directory is complete. "
-            f"model_path={model_path}"
-        )
-
-    if checked_stats:
-        return
-
-    model_dir = Path(model_path)
-    if not model_dir.exists() or not model_dir.is_dir():
-        raise AssertionError(
-            "SmolVLA model_path must be an existing directory for stats validation. "
-            f"model_path={model_path}"
-        )
-
-    tensor_stats_files = [
-        model_dir / "stats.safetensors",
-        model_dir / "dataset_stats.safetensors",
-    ]
-    tensor_stats_files.extend(
-        sorted(model_dir.glob("policy_preprocessor_step_*_normalizer_processor.safetensors"))
-    )
-
-    json_stats_files = [
-        model_dir / "stats.json",
-        model_dir / "dataset_stats.json",
-    ]
-
-    tensor_stats_files = [p for p in tensor_stats_files if p.exists()]
-    json_stats_files = [p for p in json_stats_files if p.exists()]
-
-    if not tensor_stats_files and not json_stats_files:
-        raise AssertionError(
-            "SmolVLA policy does not expose normalization statistic buffers and no "
-            "stats artifact was found in model directory. Expected one of: "
-            "stats.safetensors, dataset_stats.safetensors, stats.json, "
-            "dataset_stats.json, policy_preprocessor_step_*_normalizer_processor.safetensors. "
-            f"model_path={model_path}"
-        )
-
-    if tensor_stats_files:
-        try:
-            from safetensors.torch import load_file
-        except Exception as exc:
-            raise AssertionError(
-                "Failed to import safetensors while validating SmolVLA stats. "
-                f"model_path={model_path}"
-            ) from exc
-
-        finite_tensor_count = 0
-        for tensor_file in tensor_stats_files:
-            state = load_file(str(tensor_file))
-            if not state:
-                raise AssertionError(
-                    "Normalization stats file is empty. "
-                    f"file={tensor_file}"
-                )
-            for tensor_name, tensor_value in state.items():
-                if not torch.isfinite(tensor_value).all():
-                    raise AssertionError(
-                        "Detected non-finite values in SmolVLA normalization stats file. "
-                        f"file={tensor_file} tensor={tensor_name}"
-                    )
-                finite_tensor_count += int(tensor_value.numel())
-
-        if finite_tensor_count <= 0:
-            raise AssertionError(
-                "SmolVLA normalization stats files were loaded but contained no tensor values. "
-                f"model_path={model_path}"
-            )
-        return
-
-    finite_number_count = 0
-    for json_file in json_stats_files:
-        with open(json_file, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-
-        def _scan_numbers(obj: Any, key_path: str = "root") -> None:
-            nonlocal finite_number_count
-            if isinstance(obj, dict):
-                for k, v in obj.items():
-                    _scan_numbers(v, f"{key_path}.{k}")
-                return
-            if isinstance(obj, list):
-                for idx, v in enumerate(obj):
-                    _scan_numbers(v, f"{key_path}[{idx}]")
-                return
-            if isinstance(obj, (int, float)):
-                if not np.isfinite(obj):
-                    raise AssertionError(
-                        "Detected non-finite value in SmolVLA normalization json. "
-                        f"file={json_file} key={key_path} value={obj}"
-                    )
-                finite_number_count += 1
-
-        _scan_numbers(payload)
-
-    if finite_number_count <= 0:
-        raise AssertionError(
-            "SmolVLA normalization json exists but contains no numeric statistics. "
-            f"model_path={model_path}"
-        )
 
 
 class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
@@ -231,7 +92,8 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
 
             self.policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
 
-        assert_smolvla_normalization_stats_initialized(self.policy, cfg.model_path)
+        self._has_dumped_select_action_batch = False
+        self._has_triggered_debug_pause = False
 
         self.action_dim = cfg.action_dim
         self.num_action_chunks = cfg.num_action_chunks
@@ -341,6 +203,79 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
             }
         return batch
 
+    @staticmethod
+    def _to_pickleable_cpu(obj: Any) -> Any:
+        if isinstance(obj, torch.Tensor):
+            return obj.detach().cpu()
+        if isinstance(obj, np.ndarray):
+            return obj
+        if isinstance(obj, dict):
+            return {
+                key: SmolVLAForRLActionPrediction._to_pickleable_cpu(value)
+                for key, value in obj.items()
+            }
+        if isinstance(obj, list):
+            return [SmolVLAForRLActionPrediction._to_pickleable_cpu(v) for v in obj]
+        if isinstance(obj, tuple):
+            return tuple(SmolVLAForRLActionPrediction._to_pickleable_cpu(v) for v in obj)
+        return obj
+
+    def _dump_batch_before_select_action(self, batch_obs: dict[str, Any]) -> None:
+        if self._has_dumped_select_action_batch:
+            return
+
+        dump_dir = Path(
+            os.environ.get("RLINF_SMOLVLA_DEBUG_DIR", "/tmp/rlinf_smolvla_debug")
+        )
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        dump_path = dump_dir / (
+            f"batch_before_select_action_pid{os.getpid()}_{int(time.time() * 1000)}.pkl"
+        )
+
+        payload = {
+            "batch_obs": self._to_pickleable_cpu(batch_obs),
+            "image_keys": list(self.image_keys),
+            "main_image_env_key": self.main_image_env_key,
+            "wrist_image_env_key": self.wrist_image_env_key,
+        }
+        with open(dump_path, "wb") as f:
+            pickle.dump(payload, f)
+
+        logging.info("[SmolVLA][debug] Saved pre-select_action batch to %s", dump_path)
+        self._has_dumped_select_action_batch = True
+
+    def _maybe_pause_before_select_action(self) -> None:
+        if self._has_triggered_debug_pause:
+            return
+
+        if os.environ.get("RLINF_SMOLVLA_BREAKPOINT", "0") == "1":
+            self._has_triggered_debug_pause = True
+            logging.info(
+                "[SmolVLA][debug] Triggering built-in breakpoint() before select_action."
+            )
+            breakpoint()
+            return
+
+        if os.environ.get("RLINF_SMOLVLA_WAIT_FOR_DEBUGGER", "0") == "1":
+            try:
+                debugpy = importlib.import_module("debugpy")
+            except Exception as exc:
+                raise RuntimeError(
+                    "RLINF_SMOLVLA_WAIT_FOR_DEBUGGER=1 but debugpy is not available."
+                ) from exc
+
+            host = os.environ.get("RLINF_SMOLVLA_DEBUG_HOST", "127.0.0.1")
+            port = int(os.environ.get("RLINF_SMOLVLA_DEBUG_PORT", "5678"))
+            logging.info(
+                "[SmolVLA][debug] Waiting for debugger attach at %s:%d before select_action",
+                host,
+                port,
+            )
+            debugpy.listen((host, port))
+            debugpy.wait_for_client()
+            debugpy.breakpoint()
+            self._has_triggered_debug_pause = True
+
     # ------------------------------------------------------------------
     # Flow-matching log-prob
     # ------------------------------------------------------------------
@@ -438,6 +373,9 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         # Clear queue so generation uses the current observation.
         if hasattr(self.policy, "reset"):
             self.policy.reset()
+
+        self._dump_batch_before_select_action(batch_obs)
+        self._maybe_pause_before_select_action()
 
         # The first select_action call runs the full VLM + flow-matching
         # denoising and caches the generated chunk internally.
