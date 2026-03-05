@@ -76,11 +76,17 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
 
     _no_split_modules = ["SmolVLAModel", "ValueHead"]
 
-    def __init__(self, cfg: DictConfig) -> None:
+    def __init__(self, cfg: DictConfig, policy=None) -> None:
         nn.Module.__init__(self)
-        from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
-        self.policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
+        if policy is not None:
+            self.policy = policy
+        else:
+            # Fallback: load directly (works in non-FSDP / single-GPU contexts).
+            from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+
+            self.policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
+
         self.action_dim = cfg.action_dim
         self.num_action_chunks = cfg.num_action_chunks
 
