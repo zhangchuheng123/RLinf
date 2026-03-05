@@ -109,7 +109,7 @@ embodied = [
     "imageio[ffmpeg]",
     "gymnasium",
     "gym",
-    "lerobot[smolvla]",
+    "lerobot[smolvla]==0.3.3",
     "num2words",
 ]
 franka = [
