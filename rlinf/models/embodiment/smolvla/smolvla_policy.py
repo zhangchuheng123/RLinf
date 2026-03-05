@@ -39,6 +39,8 @@ RLinf LIBERO environment provides:
 """
 
 from typing import Any, Literal
+from pathlib import Path
+import json
 import logging
 
 import numpy as np
@@ -83,21 +85,111 @@ def assert_smolvla_normalization_stats_initialized(
             if not torch.isfinite(stat_value).all():
                 bad_stats.append(f"{module_name}.{stat_name}")
 
-    if not checked_stats:
-        raise AssertionError(
-            "SmolVLA policy does not expose normalization statistic buffers under "
-            "`normalize_inputs`/`normalize_targets`. "
-            "Cannot verify checkpoint integrity. "
-            f"model_path={model_path}"
-        )
-
-    if bad_stats:
+    if checked_stats and bad_stats:
         preview = ", ".join(bad_stats[:8])
         raise AssertionError(
             "Detected non-finite SmolVLA normalization stats "
             f"({preview}). This usually means checkpoint statistics were not loaded. "
             "Use a pretrained SmolVLA checkpoint that includes normalization stats "
             "and verify the model directory is complete. "
+            f"model_path={model_path}"
+        )
+
+    if checked_stats:
+        return
+
+    model_dir = Path(model_path)
+    if not model_dir.exists() or not model_dir.is_dir():
+        raise AssertionError(
+            "SmolVLA model_path must be an existing directory for stats validation. "
+            f"model_path={model_path}"
+        )
+
+    tensor_stats_files = [
+        model_dir / "stats.safetensors",
+        model_dir / "dataset_stats.safetensors",
+    ]
+    tensor_stats_files.extend(
+        sorted(model_dir.glob("policy_preprocessor_step_*_normalizer_processor.safetensors"))
+    )
+
+    json_stats_files = [
+        model_dir / "stats.json",
+        model_dir / "dataset_stats.json",
+    ]
+
+    tensor_stats_files = [p for p in tensor_stats_files if p.exists()]
+    json_stats_files = [p for p in json_stats_files if p.exists()]
+
+    if not tensor_stats_files and not json_stats_files:
+        raise AssertionError(
+            "SmolVLA policy does not expose normalization statistic buffers and no "
+            "stats artifact was found in model directory. Expected one of: "
+            "stats.safetensors, dataset_stats.safetensors, stats.json, "
+            "dataset_stats.json, policy_preprocessor_step_*_normalizer_processor.safetensors. "
+            f"model_path={model_path}"
+        )
+
+    if tensor_stats_files:
+        try:
+            from safetensors.torch import load_file
+        except Exception as exc:
+            raise AssertionError(
+                "Failed to import safetensors while validating SmolVLA stats. "
+                f"model_path={model_path}"
+            ) from exc
+
+        finite_tensor_count = 0
+        for tensor_file in tensor_stats_files:
+            state = load_file(str(tensor_file))
+            if not state:
+                raise AssertionError(
+                    "Normalization stats file is empty. "
+                    f"file={tensor_file}"
+                )
+            for tensor_name, tensor_value in state.items():
+                if not torch.isfinite(tensor_value).all():
+                    raise AssertionError(
+                        "Detected non-finite values in SmolVLA normalization stats file. "
+                        f"file={tensor_file} tensor={tensor_name}"
+                    )
+                finite_tensor_count += int(tensor_value.numel())
+
+        if finite_tensor_count <= 0:
+            raise AssertionError(
+                "SmolVLA normalization stats files were loaded but contained no tensor values. "
+                f"model_path={model_path}"
+            )
+        return
+
+    finite_number_count = 0
+    for json_file in json_stats_files:
+        with open(json_file, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        def _scan_numbers(obj: Any, key_path: str = "root") -> None:
+            nonlocal finite_number_count
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    _scan_numbers(v, f"{key_path}.{k}")
+                return
+            if isinstance(obj, list):
+                for idx, v in enumerate(obj):
+                    _scan_numbers(v, f"{key_path}[{idx}]")
+                return
+            if isinstance(obj, (int, float)):
+                if not np.isfinite(obj):
+                    raise AssertionError(
+                        "Detected non-finite value in SmolVLA normalization json. "
+                        f"file={json_file} key={key_path} value={obj}"
+                    )
+                finite_number_count += 1
+
+        _scan_numbers(payload)
+
+    if finite_number_count <= 0:
+        raise AssertionError(
+            "SmolVLA normalization json exists but contains no numeric statistics. "
             f"model_path={model_path}"
         )
 
