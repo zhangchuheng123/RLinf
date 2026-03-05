@@ -35,6 +35,8 @@ bash examples/embodiment/run_libero_ppo_openpi_pi0.sh
 # Run SmolVLA
 
 ```bash
+rm -rf .venv
+bash requirements/install.sh embodied --model smolvla --env maniskill_libero
 uv run --no-sync hf download HuggingFaceVLA/smolvla_libero --local-dir ./models/smolvla_libero
 bash examples/embodiment/run_libero_ppo_smolvla.sh
 ```
