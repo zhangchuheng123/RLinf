@@ -93,7 +93,6 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         self.model_path = cfg.model_path
         self._debug_dump_dir = Path(self.model_path).resolve().parent / "smolvla_debug"
         self._has_dumped_select_action_batch = False
-        self._has_triggered_debug_pause = False
 
         self.action_dim = cfg.action_dim
         self.num_action_chunks = cfg.num_action_chunks
@@ -242,24 +241,6 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         logging.info("[SmolVLA][debug] Saved pre-select_action batch to %s", dump_path)
         self._has_dumped_select_action_batch = True
 
-    def _maybe_pause_before_select_action(self) -> None:
-        if self._has_triggered_debug_pause:
-            return
-
-        try:
-            from ray.util.rpdb import set_trace as ray_set_trace
-        except Exception as exc:
-            raise RuntimeError(
-                "Failed to import ray.util.rpdb for in-worker pdb debugging."
-            ) from exc
-
-        logging.info(
-            "[SmolVLA][debug] Entering Ray remote pdb before select_action. "
-            "Use `ray debug` in another terminal to attach."
-        )
-        self._has_triggered_debug_pause = True
-        ray_set_trace()
-
     # ------------------------------------------------------------------
     # Flow-matching log-prob
     # ------------------------------------------------------------------
@@ -359,7 +340,6 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
             self.policy.reset()
 
         self._dump_batch_before_select_action(batch_obs)
-        self._maybe_pause_before_select_action()
 
         # The first select_action call runs the full VLM + flow-matching
         # denoising and caches the generated chunk internally.
