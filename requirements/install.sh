@@ -17,7 +17,7 @@ GITHUB_PREFIX=""
 NO_ROOT=0
 NO_INSTALL_RLINF_CMD="--no-install-project"
 SUPPORTED_TARGETS=("embodied" "agentic" "docs")
-SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "gr00t" "dexbotic")
+SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "gr00t" "dexbotic" "smolvla")
 SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "frankasim" "robotwin" "habitat" "opensora" "wan")
 
 #=======================Utility Functions=======================
@@ -533,6 +533,25 @@ install_dexbotic_model() {
     uv pip uninstall pynvml || true
 }
 
+install_smolvla_model() {
+    case "$ENV_NAME" in
+        maniskill_libero)
+            create_and_sync_venv
+            install_common_embodied_deps
+            install_maniskill_libero_env
+            # lerobot[smolvla] is declared in pyproject.toml[embodied] and
+            # installed by uv sync.  Pin it explicitly so that a stale
+            # git-based lerobot (e.g. 0.1.0 from openpi) is replaced.
+            uv pip install "lerobot[smolvla]>=0.3"
+            ;;
+        *)
+            echo "Environment '$ENV_NAME' is not supported for SmolVLA model." >&2
+            exit 1
+            ;;
+    esac
+    uv pip uninstall pynvml || true
+}
+
 install_env_only() {
     create_and_sync_venv
     SKIP_ROS=${SKIP_ROS:-0}
@@ -857,6 +876,9 @@ main() {
                     ;;
                 dexbotic)
                     install_dexbotic_model
+                    ;;
+                smolvla)
+                    install_smolvla_model
                     ;;
                 "")
                     install_env_only
