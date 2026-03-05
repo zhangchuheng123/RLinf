@@ -40,8 +40,6 @@ RLinf LIBERO environment provides:
 
 from typing import Any, Literal
 from pathlib import Path
-import importlib
-import os
 import pickle
 import time
 import logging
@@ -92,6 +90,8 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
 
             self.policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
 
+        self.model_path = cfg.model_path
+        self._debug_dump_dir = Path(self.model_path).resolve().parent / "smolvla_debug"
         self._has_dumped_select_action_batch = False
         self._has_triggered_debug_pause = False
 
@@ -224,12 +224,10 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         if self._has_dumped_select_action_batch:
             return
 
-        dump_dir = Path(
-            os.environ.get("RLINF_SMOLVLA_DEBUG_DIR", "/tmp/rlinf_smolvla_debug")
-        )
+        dump_dir = self._debug_dump_dir
         dump_dir.mkdir(parents=True, exist_ok=True)
         dump_path = dump_dir / (
-            f"batch_before_select_action_pid{os.getpid()}_{int(time.time() * 1000)}.pkl"
+            f"batch_before_select_action_{int(time.time() * 1000)}.pkl"
         )
 
         payload = {
@@ -248,33 +246,20 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         if self._has_triggered_debug_pause:
             return
 
-        if os.environ.get("RLINF_SMOLVLA_BREAKPOINT", "0") == "1":
-            self._has_triggered_debug_pause = True
-            logging.info(
-                "[SmolVLA][debug] Triggering built-in breakpoint() before select_action."
-            )
-            breakpoint()
-            return
+        continue_file = self._debug_dump_dir / "CONTINUE_SELECT_ACTION"
+        logging.info(
+            "[SmolVLA][debug] Paused before select_action. "
+            "Create file to continue: %s",
+            continue_file,
+        )
+        while not continue_file.exists():
+            time.sleep(1.0)
 
-        if os.environ.get("RLINF_SMOLVLA_WAIT_FOR_DEBUGGER", "0") == "1":
-            try:
-                debugpy = importlib.import_module("debugpy")
-            except Exception as exc:
-                raise RuntimeError(
-                    "RLINF_SMOLVLA_WAIT_FOR_DEBUGGER=1 but debugpy is not available."
-                ) from exc
-
-            host = os.environ.get("RLINF_SMOLVLA_DEBUG_HOST", "127.0.0.1")
-            port = int(os.environ.get("RLINF_SMOLVLA_DEBUG_PORT", "5678"))
-            logging.info(
-                "[SmolVLA][debug] Waiting for debugger attach at %s:%d before select_action",
-                host,
-                port,
-            )
-            debugpy.listen((host, port))
-            debugpy.wait_for_client()
-            debugpy.breakpoint()
-            self._has_triggered_debug_pause = True
+        logging.info(
+            "[SmolVLA][debug] Continue marker detected, resume select_action: %s",
+            continue_file,
+        )
+        self._has_triggered_debug_pause = True
 
     # ------------------------------------------------------------------
     # Flow-matching log-prob
