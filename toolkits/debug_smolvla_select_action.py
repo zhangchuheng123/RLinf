@@ -32,6 +32,7 @@ policy.eval()
 
 try:
     with torch.no_grad():
+        import pdb; pdb.set_trace()  # debug before select_action
         action = policy.select_action(batch_obs)
     print("[debug] select_action ok")
     if isinstance(action, torch.Tensor):
