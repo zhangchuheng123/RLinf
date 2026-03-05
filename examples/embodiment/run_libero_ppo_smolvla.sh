@@ -12,6 +12,10 @@ export PYTHONPATH="${REPO_PATH}"
 export RAY_OVERRIDE_RUNTIME_ENV_DEFAULT_EXCLUDES=""
 export RAY_RUNTIME_ENV_WORKING_DIR_EXCLUDES=".git,.venv"
 
+# Stop any stale Ray cluster from a previous run so workers pick up the
+# current venv's Python environment cleanly.
+uv run --no-sync ray stop --force 2>/dev/null || true
+
 # Hard-coded training config (SmolVLA + LIBERO-10 + PPO).
 CONFIG_NAME="libero_10_ppo_smolvla"
 MODEL_PATH="${REPO_PATH}/models/smolvla_libero"

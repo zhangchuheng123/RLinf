@@ -539,10 +539,9 @@ install_smolvla_model() {
             create_and_sync_venv
             install_common_embodied_deps
             install_maniskill_libero_env
-            # lerobot[smolvla] is declared in pyproject.toml[embodied] and
-            # installed by uv sync --extra embodied (in install_common_embodied_deps).
-            # No extra uv pip install needed — doing so would run an independent
-            # resolution that can break other deps (ray, gymnasium, etc.).
+            # Reinstall ray explicitly: some pip installs in the chain can
+            # accidentally remove it through dependency re-resolution.
+            uv pip install "ray[default]>=2.47.0"
             ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for SmolVLA model." >&2
