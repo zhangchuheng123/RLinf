@@ -222,6 +222,7 @@ class LiberoPPODDPNoRayRunner:
 
                 loss, _ = policy_loss(
                     loss_type=str(self.cfg.algorithm.loss_type),
+                    task_type="embodied",
                     logprobs=logprobs.float(),
                     old_logprobs=old_logprobs.float(),
                     advantages=advantages.float(),

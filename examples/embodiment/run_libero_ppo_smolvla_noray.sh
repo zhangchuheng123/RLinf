@@ -14,26 +14,8 @@ export UV_PROJECT_ENVIRONMENT="${REPO_PATH}/.venv"
 CONFIG_NAME="libero_10_ppo_smolvla"
 MODEL_PATH="${MODEL_PATH:-${REPO_PATH}/models/smolvla_libero}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
-
-if [[ ! -d "${MODEL_PATH}" ]]; then
-  echo "[ERROR] SmolVLA model directory not found: ${MODEL_PATH}" >&2
-  exit 1
-fi
-
-if [[ ! -f "${MODEL_PATH}/config.json" ]]; then
-  echo "[ERROR] Missing config.json in SmolVLA model directory: ${MODEL_PATH}" >&2
-  exit 1
-fi
-
-if [[ ! -f "${MODEL_PATH}/stats.safetensors" \
-      && ! -f "${MODEL_PATH}/dataset_stats.safetensors" \
-      && ! -f "${MODEL_PATH}/stats.json" \
-      && ! -f "${MODEL_PATH}/dataset_stats.json" \
-      && -z "$(compgen -G "${MODEL_PATH}/policy_preprocessor_step_*_normalizer_processor.safetensors")" ]]; then
-  echo "[ERROR] Missing normalization stats in SmolVLA model directory: ${MODEL_PATH}" >&2
-  echo "[ERROR] Expected one of: stats.safetensors, dataset_stats.safetensors, stats.json, dataset_stats.json, policy_preprocessor_step_*_normalizer_processor.safetensors" >&2
-  exit 1
-fi
+MODEL_PRECISION="${MODEL_PRECISION:-fp32}"
+STATE_DIM="${STATE_DIM:-8}"
 
 TRAIN_ENVS=16
 EVAL_ENVS=10
@@ -53,6 +35,9 @@ uv run --no-sync torchrun \
   runner.logger.log_path="${LOG_DIR}" \
   actor.model.model_path="${MODEL_PATH}" \
   rollout.model.model_path="${MODEL_PATH}" \
+  actor.model.precision="${MODEL_PRECISION}" \
+  rollout.model.precision="${MODEL_PRECISION}" \
+  actor.model.state_dim="${STATE_DIM}" \
   env.train.total_num_envs="${TRAIN_ENVS}" \
   env.eval.total_num_envs="${EVAL_ENVS}" \
   actor.micro_batch_size="${MICRO_BATCH}" \

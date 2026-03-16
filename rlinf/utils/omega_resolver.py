@@ -22,10 +22,10 @@ def omegaconf_register():
     global _REGISTERED
     if _REGISTERED:  # avoid duplicate
         return
-    OmegaConf.register_new_resolver("multiply", lambda x, y: x * y)
-    OmegaConf.register_new_resolver("int_div", lambda x, y: x // y)
-    OmegaConf.register_new_resolver("subtract", lambda x, y: x - y)
-    OmegaConf.register_new_resolver("not", lambda x: not bool(x))
+    OmegaConf.register_new_resolver("multiply", lambda x, y: x * y, replace=True)
+    OmegaConf.register_new_resolver("int_div", lambda x, y: x // y, replace=True)
+    OmegaConf.register_new_resolver("subtract", lambda x, y: x - y, replace=True)
+    OmegaConf.register_new_resolver("not", lambda x: not bool(x), replace=True)
     OmegaConf.register_new_resolver(
         "torch.dtype", lambda dtype_name: getattr(torch, dtype_name), replace=True
     )

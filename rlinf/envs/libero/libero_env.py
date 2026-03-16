@@ -399,17 +399,52 @@ class LiberoEnv(gym.Env):
 
         raw_chunk_terminations = []
         raw_chunk_truncations = []
+        done_in_chunk = torch.zeros(self.num_envs, dtype=torch.bool)
+        pending_reset_mask = np.zeros(self.num_envs, dtype=bool)
+
+        def _reset_done_envs(mask: np.ndarray) -> tuple[dict, dict]:
+            env_idx = np.flatnonzero(mask)
+            reset_state_ids = (
+                self.reset_state_ids[env_idx] if self.use_fixed_reset_state_ids else None
+            )
+            return self.reset(env_idx=env_idx, reset_state_ids=reset_state_ids)
+
         for i in range(chunk_size):
+            if pending_reset_mask.any():
+                _reset_done_envs(pending_reset_mask)
+                pending_reset_mask[:] = False
+
             actions = chunk_actions[:, i]
             extracted_obs, step_reward, terminations, truncations, infos = self.step(
                 actions, auto_reset=False
             )
+
+            if done_in_chunk.any():
+                step_reward = step_reward.clone()
+                terminations = terminations.clone()
+                truncations = truncations.clone()
+                step_reward[done_in_chunk] = 0
+                terminations[done_in_chunk] = False
+                truncations[done_in_chunk] = False
+
+            newly_done = torch.logical_and(
+                torch.logical_or(terminations, truncations), ~done_in_chunk
+            )
+            if newly_done.any():
+                done_in_chunk = torch.logical_or(done_in_chunk, newly_done)
+                pending_reset_mask[newly_done.cpu().numpy()] = True
+
             obs_list.append(extracted_obs)
             infos_list.append(infos)
 
             chunk_rewards.append(step_reward)
             raw_chunk_terminations.append(terminations)
             raw_chunk_truncations.append(truncations)
+
+        if pending_reset_mask.any():
+            obs, infos = _reset_done_envs(pending_reset_mask)
+            obs_list[-1] = obs
+            infos_list[-1] = infos
 
         chunk_rewards = torch.stack(chunk_rewards, dim=1)  # [num_envs, chunk_steps]
         raw_chunk_terminations = torch.stack(

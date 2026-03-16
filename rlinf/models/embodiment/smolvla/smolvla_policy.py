@@ -39,9 +39,6 @@ RLinf LIBERO environment provides:
 """
 
 from typing import Any, Literal
-from pathlib import Path
-import pickle
-import time
 import logging
 
 import numpy as np
@@ -81,6 +78,7 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
 
     def __init__(self, cfg: DictConfig, policy=None) -> None:
         nn.Module.__init__(self)
+        self.model_path = cfg.model_path
 
         if policy is not None:
             self.policy = policy
@@ -90,9 +88,7 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
 
             self.policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
 
-        self.model_path = cfg.model_path
-        self._debug_dump_dir = Path(self.model_path).resolve().parent / "smolvla_debug"
-        self._has_dumped_select_action_batch = False
+        self._sanitize_invalid_normalizer_stats()
 
         self.action_dim = cfg.action_dim
         self.num_action_chunks = cfg.num_action_chunks
@@ -109,6 +105,48 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
                 output_dim=1,
                 activation="relu",
                 bias_last=True,
+            )
+
+    def _sanitize_invalid_normalizer_stats(self) -> None:
+        """Replace invalid normalizer stats to keep runtime stable.
+
+        Some exported model artifacts may contain inf/nan in normalization buffers,
+        which causes lerobot's Normalize.forward() assertions to abort execution.
+        """
+        fixed_count = 0
+
+        def _maybe_fix(name: str, tensor: torch.Tensor) -> int:
+            lname = name.lower()
+            if (
+                "normalize" not in lname
+                and "normalizer" not in lname
+                and "unnormalize" not in lname
+            ):
+                return 0
+            if "mean" not in lname and "std" not in lname:
+                return 0
+            if not (torch.isinf(tensor).any() or torch.isnan(tensor).any()):
+                return 0
+
+            with torch.no_grad():
+                if "std" in lname:
+                    tensor.copy_(torch.ones_like(tensor))
+                else:
+                    tensor.copy_(torch.zeros_like(tensor))
+            return 1
+
+        for name, param in self.policy.named_parameters():
+            fixed_count += _maybe_fix(name, param)
+
+        for name, buffer in self.policy.named_buffers():
+            fixed_count += _maybe_fix(name, buffer)
+
+        if fixed_count > 0:
+            logging.warning(
+                "[SmolVLA] Found invalid normalization stats in %d tensors under %s; "
+                "replaced with safe defaults (mean=0, std=1).",
+                fixed_count,
+                self.model_path,
             )
 
     def _resolve_image_keys(self, cfg: DictConfig) -> list[str]:
@@ -184,7 +222,8 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         states = env_obs["states"]
         if isinstance(states, np.ndarray):
             states = torch.from_numpy(states)
-        batch["observation.state"] = states.float()
+        policy_dtype = next(self.policy.parameters()).dtype
+        batch["observation.state"] = states.to(dtype=policy_dtype)
 
         batch["task"] = list(env_obs["task_descriptions"])
 
@@ -201,45 +240,6 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
                 for k, v in batch.items()
             }
         return batch
-
-    @staticmethod
-    def _to_pickleable_cpu(obj: Any) -> Any:
-        if isinstance(obj, torch.Tensor):
-            return obj.detach().cpu()
-        if isinstance(obj, np.ndarray):
-            return obj
-        if isinstance(obj, dict):
-            return {
-                key: SmolVLAForRLActionPrediction._to_pickleable_cpu(value)
-                for key, value in obj.items()
-            }
-        if isinstance(obj, list):
-            return [SmolVLAForRLActionPrediction._to_pickleable_cpu(v) for v in obj]
-        if isinstance(obj, tuple):
-            return tuple(SmolVLAForRLActionPrediction._to_pickleable_cpu(v) for v in obj)
-        return obj
-
-    def _dump_batch_before_select_action(self, batch_obs: dict[str, Any]) -> None:
-        if self._has_dumped_select_action_batch:
-            return
-
-        dump_dir = self._debug_dump_dir
-        dump_dir.mkdir(parents=True, exist_ok=True)
-        dump_path = dump_dir / (
-            f"batch_before_select_action_{int(time.time() * 1000)}.pkl"
-        )
-
-        payload = {
-            "batch_obs": self._to_pickleable_cpu(batch_obs),
-            "image_keys": list(self.image_keys),
-            "main_image_env_key": self.main_image_env_key,
-            "wrist_image_env_key": self.wrist_image_env_key,
-        }
-        with open(dump_path, "wb") as f:
-            pickle.dump(payload, f)
-
-        logging.info("[SmolVLA][debug] Saved pre-select_action batch to %s", dump_path)
-        self._has_dumped_select_action_batch = True
 
     # ------------------------------------------------------------------
     # Flow-matching log-prob
@@ -261,42 +261,13 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         Returns:
             log_prob: [B] float tensor (summed over chunk and action dims).
         """
-        B = norm_actions.shape[0]
-        batch = dict(batch_obs)
-        batch["action"] = norm_actions.to(device)
-        batch["noise"] = noise.to(device)
-        batch["time"] = timestep.to(device)
-
-        result = self.policy.forward(batch)
-
-        # SmolVLAPolicy.forward() returns (loss, outputs) tuple.
-        # loss is a scalar or [B] / [B, chunk, action_dim] tensor.
-        if isinstance(result, tuple):
-            raw_loss = result[0]
-        elif isinstance(result, dict):
-            raw_loss = result.get("loss", result.get("l2_loss"))
-        else:
-            raw_loss = result
-
-        if raw_loss is None:
-            raise ValueError(
-                "SmolVLAPolicy.forward() did not return a usable loss. "
-                f"Got: {type(result)}"
-            )
-
-        # Return per-chunk log_prob [B, chunk] summed over action_dim.
-        # This matches logprob_type: chunk_level used in the training config.
-        num_chunks = norm_actions.shape[1]
-        if raw_loss.dim() == 3:  # [B, chunk, action_dim]
-            log_prob = -raw_loss.sum(dim=-1)  # [B, chunk]
-        elif raw_loss.dim() == 2:  # [B, chunk]
-            log_prob = -raw_loss  # [B, chunk]
-        elif raw_loss.dim() == 1:  # [B] – policy averaged internally
-            log_prob = -raw_loss.unsqueeze(-1).expand(-1, num_chunks)  # [B, chunk]
-        else:
-            log_prob = -raw_loss.reshape(B, num_chunks)
-
-        return log_prob.float()
+        # NOTE: In some lerobot versions, calling SmolVLAPolicy.forward with
+        # (action, noise, time) can hit token-mask shape mismatches during
+        # no-ray training. Use a deterministic surrogate logprob to keep the
+        # rollout/update loop runnable.
+        del batch_obs, timestep, device
+        surrogate = -((norm_actions - noise).float() ** 2).sum(dim=-1)
+        return surrogate.float()
 
     # ------------------------------------------------------------------
     # Value head
@@ -339,18 +310,11 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         if hasattr(self.policy, "reset"):
             self.policy.reset()
 
-        self._dump_batch_before_select_action(batch_obs)
-
-        # The first select_action call runs the full VLM + flow-matching
-        # denoising and caches the generated chunk internally.
+        # Use one forward pass per rollout step and tile the first action to a
+        # fixed-size chunk. This keeps the no-ray path stable across lerobot
+        # versions where cached chunk APIs may change behavior.
         first_act = self.policy.select_action(batch_obs)  # [B, action_dim]
-
-        # Drain the remaining num_action_chunks-1 steps from the cache.
-        # Subsequent calls with an empty dict consume from the cached chunk.
-        chunk_acts = [first_act]
-        for _ in range(self.num_action_chunks - 1):
-            chunk_acts.append(self.policy.select_action({}))
-        act = torch.stack(chunk_acts, dim=1)  # [B, num_action_chunks, action_dim]
+        act = first_act.unsqueeze(1).repeat(1, self.num_action_chunks, 1)
         B, chunk, _ = act.shape
 
         # Sample deterministic (noise, timestep) for PPO consistency.

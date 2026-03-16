@@ -579,6 +579,10 @@ install_maniskill_libero_env() {
     local libero_dir
     libero_dir=$(clone_or_reuse_repo LIBERO_PATH "$VENV_DIR/libero" https://github.com/RLinf/LIBERO.git)
 
+    # LIBERO imports robosuite directly at runtime; install explicitly here to avoid
+    # partial/legacy envs missing it even if common deps were skipped previously.
+    uv pip install robosuite==1.4.1 bddl
+
     uv pip install -e "$libero_dir"
     echo "export PYTHONPATH=$(realpath "$libero_dir"):\$PYTHONPATH" >> "$VENV_DIR/bin/activate"
     uv pip install git+${GITHUB_PREFIX}https://github.com/haosulab/ManiSkill.git@v3.0.0b22
