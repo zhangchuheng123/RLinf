@@ -44,6 +44,7 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
         # from_pretrained handles config parsing internally, creates the
         # architecture with load_vlm_weights=False, then loads ALL weights
         # (including VLM backbone) from the safetensors checkpoint.
+        # TODO: 这个模型是否是微调过的 SmolVLA？
         policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
     finally:
         SmolVLMWithExpertModel.__init__ = _orig_init

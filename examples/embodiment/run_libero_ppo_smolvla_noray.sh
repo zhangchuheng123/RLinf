@@ -15,16 +15,20 @@ export UV_PROJECT_ENVIRONMENT="${REPO_PATH}/.venv"
 export EMBODIED_PATH="${EMBODIED_PATH}"
 
 CONFIG_NAME="libero_10_ppo_smolvla"
-MODEL_PATH="${MODEL_PATH:-${REPO_PATH}/models/smolvla_libero}"
+MODEL_PATH="${REPO_PATH}/models/smolvla_libero"
 
-NPROC_PER_NODE=1
+GPU_COUNT="$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)"
+
+NPROC_PER_NODE="${GPU_COUNT}"
 MODEL_PRECISION="fp32"
 STATE_DIM=8
+# User should set TRAIN_ENVS to be divisible by NPROC_PER_NODE.
 TRAIN_ENVS=2
+# User should set EVAL_ENVS to be divisible by NPROC_PER_NODE.
 EVAL_ENVS=4
 MICRO_BATCH=16
 GLOBAL_BATCH=128
-SAVE_EVAL_VIDEO="${SAVE_EVAL_VIDEO:-True}"
+SAVE_EVAL_VIDEO=True
 
 LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}_noray"
 MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"

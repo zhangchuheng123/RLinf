@@ -86,6 +86,7 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
             # Fallback: load directly (works in non-FSDP / single-GPU contexts).
             from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
+            # TODO: 这个模型是否是微调过的 SmolVLA？
             self.policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
 
         self._sanitize_invalid_normalizer_stats()

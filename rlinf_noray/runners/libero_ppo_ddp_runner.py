@@ -188,28 +188,32 @@ class LiberoPPODDPNoRayRunner:
         return arr
 
     @staticmethod
-    def _render_overlay_frame(main_image: Any, instruction: str, action: Any) -> np.ndarray:
+    def _render_overlay_frame(main_image: Any, action: Any) -> np.ndarray:
         frame = LiberoPPODDPNoRayRunner._to_uint8_hwc(main_image)
         pil = Image.fromarray(frame)
         draw = ImageDraw.Draw(pil)
         font = ImageFont.load_default()
 
         action_np = np.asarray(action, dtype=np.float32).reshape(-1)
-        action_text = "[" + ", ".join(f"{v:+.3f}" for v in action_np.tolist()) + "]"
-        lines = ["instruction:"] + (wrap(str(instruction), width=56) or [""])
-        lines += ["action:"] + (wrap(action_text, width=56) or [""])
+        action_text = "[" + ", ".join(f"{v:+.2f}" for v in action_np.tolist()) + "]"
+        max_chars = max(12, frame.shape[1] // 8)
+        lines = ["action:"] + (wrap(action_text, width=max_chars) or [""])
         text = "\n".join(lines)
-
-        bbox = draw.multiline_textbbox((0, 0), text, font=font, spacing=2)
-        pad = 6
-        left, top = 8, 8
-        right = left + (bbox[2] - bbox[0]) + 2 * pad
-        bottom = top + (bbox[3] - bbox[1]) + 2 * pad
-        draw.rectangle((left, top, right, bottom), fill=(0, 0, 0, 170))
-        draw.multiline_text((left + pad, top + pad), text, fill=(255, 255, 255), font=font, spacing=2)
+        draw.multiline_text((8, 8), text, fill=(255, 255, 255), font=font, spacing=2)
         return np.asarray(pil)
 
-    def _save_eval_videos(self, frames_by_env: list[list[np.ndarray]], epoch: int) -> None:
+    @staticmethod
+    def _instruction_to_slug(instruction: str) -> str:
+        slug = "".join(ch if ch.isalnum() else "_" for ch in str(instruction).strip())
+        slug = "_".join(part for part in slug.split("_") if part)
+        return (slug or "task")[:80]
+
+    def _save_eval_videos(
+        self,
+        frames_by_env: list[list[np.ndarray]],
+        instructions_by_env: list[str],
+        epoch: int,
+    ) -> None:
         if not self.eval_video_base_dir:
             return
         base_dir = Path(self.eval_video_base_dir)
@@ -220,7 +224,8 @@ class LiberoPPODDPNoRayRunner:
             if not frames:
                 continue
             traj_idx = traj_offset + local_idx
-            out_path = base_dir / f"val_epoch_{epoch}_traj_{traj_idx:02d}.mp4"
+            instruction_slug = self._instruction_to_slug(instructions_by_env[local_idx])
+            out_path = base_dir / f"val_epoch_{epoch}_traj_{traj_idx:02d}_{instruction_slug}.mp4"
             imageio.mimsave(str(out_path), frames, fps=15)
 
     def _reduce_sums(self, sums: torch.Tensor) -> torch.Tensor:
@@ -265,8 +270,10 @@ class LiberoPPODDPNoRayRunner:
         obs, _ = env.reset()
         samples: list[RolloutSample] = []
         frames_by_env: list[list[np.ndarray]] = []
+        instructions_by_env: list[str] = []
         if save_video:
             frames_by_env = [[] for _ in range(env.num_envs)]
+            instructions_by_env = ["" for _ in range(env.num_envs)]
 
         sums = torch.zeros(6, dtype=torch.float64)
         # [sum_chunk_return, sum_step_reward, done_count, success_count, num_chunks, num_steps]
@@ -306,9 +313,10 @@ class LiberoPPODDPNoRayRunner:
                             continue
                         step_actions = chunk_actions[:, step_idx]
                         for env_idx in range(env.num_envs):
+                            if not instructions_by_env[env_idx]:
+                                instructions_by_env[env_idx] = str(task_descs[env_idx])
                             frame = self._render_overlay_frame(
                                 main_image=main_images[env_idx],
-                                instruction=task_descs[env_idx],
                                 action=step_actions[env_idx],
                             )
                             frames_by_env[env_idx].append(frame)
@@ -350,7 +358,7 @@ class LiberoPPODDPNoRayRunner:
             "num_chunks": float(sums[4].item()),
         }
         if save_video:
-            self._save_eval_videos(frames_by_env, video_epoch)
+            self._save_eval_videos(frames_by_env, instructions_by_env, video_epoch)
         return samples, metrics
 
     def _train_one_epoch(self, samples: list[RolloutSample]) -> dict[str, float]:
