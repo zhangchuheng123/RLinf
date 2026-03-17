@@ -19,12 +19,12 @@ from typing import Any, Optional
 import torch
 import torch.nn as nn
 
-from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
-from rlinf.models.embodiment.modules.flow_actor import FlowTActor, JaxFlowTActor
-from rlinf.models.embodiment.modules.q_head import MultiQHead
-from rlinf.models.embodiment.modules.resnet_utils import ResNetEncoder
-from rlinf.models.embodiment.modules.utils import init_mlp_weights, layer_init, make_mlp
-from rlinf.models.embodiment.modules.value_head import ValueHead
+from rlinf_noray.models.embodiment.base_policy import BasePolicy, ForwardType
+from rlinf_noray.models.embodiment.modules.flow_actor import FlowTActor, JaxFlowTActor
+from rlinf_noray.models.embodiment.modules.q_head import MultiQHead
+from rlinf_noray.models.embodiment.modules.resnet_utils import ResNetEncoder
+from rlinf_noray.models.embodiment.modules.utils import init_mlp_weights, layer_init, make_mlp
+from rlinf_noray.models.embodiment.modules.value_head import ValueHead
 
 
 @dataclass

@@ -30,10 +30,10 @@ def get_model_config_and_input_processor(cfg: DictConfig):
         OpenVLAConfig as OpenVLAOFTConfig,
     )
 
-    from rlinf.models.embodiment.prismatic.processing_prismatic import (
+    from rlinf_noray.models.embodiment.prismatic.processing_prismatic import (
         MultiInputPrismaticProcessor as PrismaticProcessorOFT,
     )
-    from rlinf.models.embodiment.prismatic.processing_prismatic import (
+    from rlinf_noray.models.embodiment.prismatic.processing_prismatic import (
         PrismaticImageProcessor,
     )
 
@@ -64,7 +64,7 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
         OpenVLAConfig as OpenVLAOFTConfig,
     )
 
-    from rlinf.models.embodiment.openvla_oft.rlinf.openvla_oft_action_model import (
+    from rlinf_noray.models.embodiment.openvla_oft.rlinf.openvla_oft_action_model import (
         OpenVLAOFTForRLActionPrediction,
     )
 

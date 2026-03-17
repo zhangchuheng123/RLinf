@@ -15,7 +15,7 @@
 import copy
 from typing import Optional, Union
 
-import gym
+import gymnasium as gym
 import habitat
 import numpy as np
 import torch

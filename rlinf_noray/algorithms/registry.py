@@ -17,7 +17,7 @@ from typing import Callable, Optional
 
 import torch
 
-from rlinf.algorithms.utils import (
+from rlinf_noray.algorithms.utils import (
     calculate_scores,
     postprocess_embodied_advantages_outputs,
     postprocess_loss_metric,

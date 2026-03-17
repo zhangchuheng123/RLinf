@@ -26,9 +26,9 @@ import yaml
 from omegaconf import OmegaConf, open_dict
 from omegaconf.dictconfig import DictConfig
 
-from rlinf.envs import SupportedEnvType
-from rlinf.scheduler.cluster import Cluster
-from rlinf.utils.placement import (
+from rlinf_noray.envs import SupportedEnvType
+from rlinf_noray.scheduler.cluster import Cluster
+from rlinf_noray.utils.placement import (
     HybridComponentPlacement,
     ModelParallelComponentPlacement,
     PlacementMode,

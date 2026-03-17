@@ -25,7 +25,7 @@ import os
 import hydra
 import torch
 
-from rlinf.models import get_model
+from rlinf_noray.models import get_model
 
 from .utils import (
     copy_model_config_and_code,

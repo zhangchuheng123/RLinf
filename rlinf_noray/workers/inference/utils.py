@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, Union
 from omegaconf import DictConfig
 
 if TYPE_CHECKING:
-    from rlinf.workers.inference.fsdp_inference_worker import FSDPInference
-    from rlinf.workers.inference.megatron_inference_worker import MegatronInference
+    from rlinf_noray.workers.inference.fsdp_inference_worker import FSDPInference
+    from rlinf_noray.workers.inference.megatron_inference_worker import MegatronInference
 
 
 def get_inference_backend_worker(
@@ -33,13 +33,13 @@ def get_inference_backend_worker(
     """
     training_backend = cfg.actor.training_backend
     if training_backend == "megatron":
-        from rlinf.workers.inference.megatron_inference_worker import (
+        from rlinf_noray.workers.inference.megatron_inference_worker import (
             MegatronInference,
         )
 
         return MegatronInference
     elif training_backend == "fsdp":
-        from rlinf.workers.inference.fsdp_inference_worker import FSDPInference
+        from rlinf_noray.workers.inference.fsdp_inference_worker import FSDPInference
 
         return FSDPInference
     else:

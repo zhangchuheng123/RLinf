@@ -26,7 +26,7 @@ import torch
 from filelock import FileLock
 from omegaconf import OmegaConf
 
-from rlinf.envs.realworld.common.wrappers import (
+from rlinf_noray.envs.realworld.common.wrappers import (
     GripperCloseEnv,
     KeyboardRewardDoneMultiStageWrapper,
     KeyboardRewardDoneWrapper,
@@ -34,9 +34,9 @@ from rlinf.envs.realworld.common.wrappers import (
     RelativeFrame,
     SpacemouseIntervention,
 )
-from rlinf.envs.realworld.venv import NoAutoResetSyncVectorEnv
-from rlinf.envs.utils import to_tensor
-from rlinf.scheduler import WorkerInfo
+from rlinf_noray.envs.realworld.venv import NoAutoResetSyncVectorEnv
+from rlinf_noray.envs.utils import to_tensor
+from rlinf_noray.scheduler import WorkerInfo
 
 
 class RealWorldEnv(gym.Env):

@@ -12,6 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from rlinf.envs.robocasa.robocasa_env import RobocasaEnv
+from rlinf_noray.envs.robocasa.robocasa_env import RobocasaEnv
 
 __all__ = ["RobocasaEnv"]

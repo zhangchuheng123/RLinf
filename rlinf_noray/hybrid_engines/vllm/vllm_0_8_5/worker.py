@@ -21,10 +21,10 @@ from vllm.logger import init_logger
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.worker.gpu_worker import Worker as _VllmInnerWorker
 
-from rlinf.scheduler import Worker as _RLinfWorker
-from rlinf.scheduler import WorkerAddress
-from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
-from rlinf.workers.rollout.utils import RankMapper
+from rlinf_noray.scheduler import Worker as _RLinfWorker
+from rlinf_noray.scheduler import WorkerAddress
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement, PlacementMode
+from rlinf_noray.workers.rollout.utils import RankMapper
 
 from . import weight_loader  # noqa all
 

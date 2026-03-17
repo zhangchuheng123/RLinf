@@ -46,8 +46,8 @@ import torch
 import torch.nn as nn
 from omegaconf import DictConfig
 
-from rlinf.models.embodiment.base_policy import BasePolicy
-from rlinf.models.embodiment.modules.value_head import ValueHead
+from rlinf_noray.models.embodiment.base_policy import BasePolicy
+from rlinf_noray.models.embodiment.modules.value_head import ValueHead
 
 
 class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):

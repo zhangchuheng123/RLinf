@@ -15,7 +15,7 @@
 import copy
 from typing import Optional, Union
 
-import gym
+import gymnasium as gym
 import habitat
 import numpy as np
 import torch
@@ -24,9 +24,9 @@ from habitat.core.registry import registry
 from habitat_baselines.config.default import get_config
 from hydra.core.global_hydra import GlobalHydra
 
-from rlinf.envs.habitat.extensions.utils import observations_to_image
-from rlinf.envs.habitat.venv import HabitatRLEnv, ReconfigureSubprocEnv
-from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
+from rlinf_noray.envs.habitat.extensions.utils import observations_to_image
+from rlinf_noray.envs.habitat.venv import HabitatRLEnv, ReconfigureSubprocEnv
+from rlinf_noray.envs.utils import list_of_dict_to_dict_of_list, to_tensor
 
 
 @registry.register_task_action

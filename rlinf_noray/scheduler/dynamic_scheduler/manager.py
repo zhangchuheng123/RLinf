@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING, Callable
 
 from omegaconf import DictConfig
 
-from rlinf.scheduler import Channel
-from rlinf.scheduler.dynamic_scheduler.utils import (
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.scheduler.dynamic_scheduler.utils import (
     RolloutAction,
     RolloutReport,
     RolloutScheduleInfo,
@@ -31,11 +31,11 @@ from rlinf.scheduler.dynamic_scheduler.utils import (
     get_scheduler_request_queue,
     get_scheduler_response_queue,
 )
-from rlinf.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
 
 if TYPE_CHECKING:
-    from rlinf.data.io_struct import SeqGroupInfo
-    from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
+    from rlinf_noray.data.io_struct import SeqGroupInfo
+    from rlinf_noray.workers.rollout.sglang.sglang_worker import SGLangWorker
 
 
 class ComponentManager(ABC):

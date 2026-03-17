@@ -24,40 +24,40 @@ from megatron.training.training import unwrap_model
 from omegaconf import DictConfig
 from torch.multiprocessing.reductions import reduce_tensor
 
-import rlinf.algorithms  # noqa: F401
-from rlinf.algorithms.registry import (
+import rlinf_noray.algorithms  # noqa: F401
+from rlinf_noray.algorithms.registry import (
     calculate_adv_and_returns,
     policy_loss,
 )
-from rlinf.algorithms.utils import kl_penalty
-from rlinf.data.io_struct import (
+from rlinf_noray.algorithms.utils import kl_penalty
+from rlinf_noray.data.io_struct import (
     DynamicRolloutResult,
     get_seq_length,
 )
-from rlinf.scheduler import Channel
-from rlinf.utils.data_iter_utils import (
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.utils.data_iter_utils import (
     get_iterator_k_split,
     get_seqlen_balanced_partitions,
     split_dynamic_batch_size,
 )
-from rlinf.utils.distributed import (
+from rlinf_noray.utils.distributed import (
     RolloutDataBalance,
     compute_rollout_metrics_dynamic,
     masked_normalization,
     vocab_parallel_entropy_and_log_probs,
     vocab_parallel_log_probs_from_logits,
 )
-from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
-from rlinf.utils.utils import (
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement, PlacementMode
+from rlinf_noray.utils.utils import (
     clear_memory,
     configure_batch_sizes,
     cpu_dict,
     cpu_weight_swap,
 )
-from rlinf.workers.actor.megatron_actor_worker import (
+from rlinf_noray.workers.actor.megatron_actor_worker import (
     MegatronActor,
 )
-from rlinf.workers.rollout.utils import CollocateRankMapper, DisaggRankMapper
+from rlinf_noray.workers.rollout.utils import CollocateRankMapper, DisaggRankMapper
 
 
 class MAMegatronActor(MegatronActor):

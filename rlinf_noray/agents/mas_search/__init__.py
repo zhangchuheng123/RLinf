@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from rlinf.agents.mas_search.mas_search_agent_loop import MasSearchAgentLoopWorker
-from rlinf.agents.searchr1.search_tool_worker import SearchToolWorker
+from rlinf_noray.agents.mas_search.mas_search_agent_loop import MasSearchAgentLoopWorker
+from rlinf_noray.agents.searchr1.search_tool_worker import SearchToolWorker
 
 __all__ = ["MasSearchAgentLoopWorker", "SearchToolWorker"]

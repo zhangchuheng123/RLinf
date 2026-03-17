@@ -18,7 +18,7 @@ from typing import Callable, Optional
 
 import torch
 
-from rlinf.config import SupportedModel, get_supported_model
+from rlinf_noray.config import SupportedModel, get_supported_model
 
 
 class TransformType(Enum):

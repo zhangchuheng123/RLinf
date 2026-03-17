@@ -21,11 +21,11 @@ import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
 
-from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
-from rlinf.models.embodiment.modules.q_head import MultiCrossQHead, MultiQHead
-from rlinf.models.embodiment.modules.resnet_utils import ResNetEncoder
-from rlinf.models.embodiment.modules.utils import init_mlp_weights, layer_init, make_mlp
-from rlinf.models.embodiment.modules.value_head import ValueHead
+from rlinf_noray.models.embodiment.base_policy import BasePolicy, ForwardType
+from rlinf_noray.models.embodiment.modules.q_head import MultiCrossQHead, MultiQHead
+from rlinf_noray.models.embodiment.modules.resnet_utils import ResNetEncoder
+from rlinf_noray.models.embodiment.modules.utils import init_mlp_weights, layer_init, make_mlp
+from rlinf_noray.models.embodiment.modules.value_head import ValueHead
 
 
 @dataclass
@@ -488,7 +488,7 @@ class CNNPolicy(nn.Module, BasePolicy):
         calculate_values: bool,
         mode: Literal["train", "eval"],
     ):
-        from rlinf.utils.cuda_graph import GraphCaptureSpec
+        from rlinf_noray.utils.cuda_graph import GraphCaptureSpec
 
         # NOTE: this assumes all inputs/params has the same device and dtype
         device = next(self.parameters()).device
@@ -562,7 +562,7 @@ class CNNPolicy(nn.Module, BasePolicy):
         self.cuda_graph_manager.capture(spec)
 
     def capture_cuda_graph(self, train_batch_size: int, eval_batch_size: int):
-        from rlinf.utils.cuda_graph import CUDAGraphManager
+        from rlinf_noray.utils.cuda_graph import CUDAGraphManager
 
         if self.cuda_graph_manager is None:
             self.cuda_graph_manager = CUDAGraphManager()

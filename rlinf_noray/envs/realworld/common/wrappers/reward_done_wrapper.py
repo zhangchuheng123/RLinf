@@ -17,7 +17,7 @@ from typing import Any, SupportsFloat
 import gymnasium as gym
 from gymnasium.core import ActType, ObsType
 
-from rlinf.envs.realworld.common.keyboard.keyboard_listener import KeyboardListener
+from rlinf_noray.envs.realworld.common.keyboard.keyboard_listener import KeyboardListener
 
 
 class BaseKeyboardRewardDoneWrapper(gym.Wrapper):

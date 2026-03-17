@@ -20,26 +20,26 @@ from typing import TYPE_CHECKING, Union
 
 from omegaconf.dictconfig import DictConfig
 
-from rlinf.scheduler import Channel
-from rlinf.scheduler import WorkerGroupFuncResult as Handle
-from rlinf.utils.distributed import ScopedTimer
-from rlinf.utils.logging import get_logger
-from rlinf.utils.metric_logger import MetricLogger
-from rlinf.utils.metric_utils import compute_evaluate_metrics, print_metrics_table
-from rlinf.utils.runner_utils import check_progress
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.scheduler import WorkerGroupFuncResult as Handle
+from rlinf_noray.utils.distributed import ScopedTimer
+from rlinf_noray.utils.logging import get_logger
+from rlinf_noray.utils.metric_logger import MetricLogger
+from rlinf_noray.utils.metric_utils import compute_evaluate_metrics, print_metrics_table
+from rlinf_noray.utils.runner_utils import check_progress
 
 if TYPE_CHECKING:
-    from rlinf.workers.actor.async_fsdp_sac_policy_worker import (
+    from rlinf_noray.workers.actor.async_fsdp_sac_policy_worker import (
         AsyncEmbodiedSACFSDPPolicy,
     )
-    from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
-    from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
-    from rlinf.workers.env.async_env_worker import AsyncEnvWorker
-    from rlinf.workers.env.env_worker import EnvWorker
-    from rlinf.workers.rollout.hf.async_huggingface_worker import (
+    from rlinf_noray.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
+    from rlinf_noray.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
+    from rlinf_noray.workers.env.async_env_worker import AsyncEnvWorker
+    from rlinf_noray.workers.env.env_worker import EnvWorker
+    from rlinf_noray.workers.rollout.hf.async_huggingface_worker import (
         AsyncMultiStepRolloutWorker,
     )
-    from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
+    from rlinf_noray.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 
 class EmbodiedRunner:

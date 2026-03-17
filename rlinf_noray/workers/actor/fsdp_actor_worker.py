@@ -25,57 +25,57 @@ from torch.distributed.tensor import DTensor
 from torch.multiprocessing.reductions import reduce_tensor
 from torch.utils import _pytree
 
-import rlinf.algorithms  # noqa: F401
-from rlinf.algorithms.registry import calculate_adv_and_returns, policy_loss
-from rlinf.algorithms.utils import (
+import rlinf_noray.algorithms  # noqa: F401
+from rlinf_noray.algorithms.registry import calculate_adv_and_returns, policy_loss
+from rlinf_noray.algorithms.utils import (
     kl_penalty,
 )
-from rlinf.config import SupportedModel, torch_dtype_from_precision
-from rlinf.data.embodied_io_struct import Trajectory, convert_trajectories_to_batch
-from rlinf.data.io_struct import BatchResizingIterator, RolloutResult
-from rlinf.hybrid_engines.fsdp.fsdp_model_manager import (
+from rlinf_noray.config import SupportedModel, torch_dtype_from_precision
+from rlinf_noray.data.embodied_io_struct import Trajectory, convert_trajectories_to_batch
+from rlinf_noray.data.io_struct import BatchResizingIterator, RolloutResult
+from rlinf_noray.hybrid_engines.fsdp.fsdp_model_manager import (
     FSDPModelManager,
 )
-from rlinf.hybrid_engines.fsdp.utils import (
+from rlinf_noray.hybrid_engines.fsdp.utils import (
     pack_fsdp_input,
     prepare_pack_fsdp,
     unpack_fsdp_logprobs,
     unpack_sequences,
 )
-from rlinf.models import get_model
-from rlinf.models.embodiment.base_policy import ForwardType
-from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
-from rlinf.utils.data_iter_utils import (
+from rlinf_noray.models import get_model
+from rlinf_noray.models.embodiment.base_policy import ForwardType
+from rlinf_noray.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
+from rlinf_noray.utils.data_iter_utils import (
     get_iterator_k_split,
     get_reverse_idx,
     get_seqlen_balanced_partitions,
     split_dynamic_batch_size,
 )
-from rlinf.utils.distributed import (
+from rlinf_noray.utils.distributed import (
     RolloutDataBalance,
     all_reduce_dict,
     all_reduce_int,
     masked_normalization,
 )
-from rlinf.utils.distributed import (
+from rlinf_noray.utils.distributed import (
     compute_rollout_metrics as compute_math_rollout_metrics,
 )
-from rlinf.utils.metric_utils import (
+from rlinf_noray.utils.metric_utils import (
     append_to_dict,
     compute_loss_mask,
     compute_rollout_metrics,
     compute_split_num,
 )
-from rlinf.utils.nested_dict_process import (
+from rlinf_noray.utils.nested_dict_process import (
     put_tensor_device,
     split_dict_to_chunk,
 )
-from rlinf.utils.placement import (
+from rlinf_noray.utils.placement import (
     HybridComponentPlacement,
     ModelParallelComponentPlacement,
 )
-from rlinf.utils.pytree import register_pytree_dataclasses
-from rlinf.utils.utils import (
+from rlinf_noray.utils.pytree import register_pytree_dataclasses
+from rlinf_noray.utils.utils import (
     clear_memory,
     compute_entropy_from_logits,
     compute_logprobs_from_logits,
@@ -85,7 +85,7 @@ from rlinf.utils.utils import (
     reshape_entropy,
     retrieve_model_state_dict_in_cpu,
 )
-from rlinf.workers.rollout.utils import RankMapper
+from rlinf_noray.workers.rollout.utils import RankMapper
 
 
 def process_nested_dict_for_adv(nested_dict, rollout_epoch):
@@ -1199,7 +1199,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
             import openpi.training.data_loader as _data
 
-            from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+            from rlinf_noray.models.embodiment.openpi.dataconfig import get_openpi_config
 
             if "config_name" not in self.cfg.actor:
                 raise ValueError(

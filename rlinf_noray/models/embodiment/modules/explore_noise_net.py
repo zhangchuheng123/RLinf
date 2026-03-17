@@ -17,7 +17,7 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 
-from rlinf.utils.logging import get_logger
+from rlinf_noray.utils.logging import get_logger
 
 activation_dict = nn.ModuleDict(
     {

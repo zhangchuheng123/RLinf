@@ -30,9 +30,9 @@ from prismatic.vla.constants import (
 )
 from transformers.generation import TopKLogitsWarper
 
-from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
-from rlinf.models.embodiment.modules.value_head import ValueHead
-from rlinf.utils.utils import (
+from rlinf_noray.models.embodiment.base_policy import BasePolicy, ForwardType
+from rlinf_noray.models.embodiment.modules.value_head import ValueHead
+from rlinf_noray.utils.utils import (
     compute_entropy_from_logits,
     compute_logprobs_from_logits,
 )

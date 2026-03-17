@@ -29,36 +29,36 @@ from megatron.training.utils import average_losses_across_data_parallel_group
 from omegaconf import DictConfig
 from torch.multiprocessing.reductions import reduce_tensor
 
-import rlinf.algorithms  # noqa: F401
-from rlinf.algorithms.registry import (
+import rlinf_noray.algorithms  # noqa: F401
+from rlinf_noray.algorithms.registry import (
     calculate_adv_and_returns,
     policy_loss,
 )
-from rlinf.algorithms.utils import kl_penalty
-from rlinf.data.io_struct import (
+from rlinf_noray.algorithms.utils import kl_penalty
+from rlinf_noray.data.io_struct import (
     BatchResizingIterator,
     RolloutResult,
     get_batch_size,
     get_seq_length,
 )
-from rlinf.hybrid_engines.megatron.megatron_model_manager import (
+from rlinf_noray.hybrid_engines.megatron.megatron_model_manager import (
     MegatronModelManager,
 )
-from rlinf.scheduler import Channel, Worker
-from rlinf.scheduler.dynamic_scheduler.utils import (
+from rlinf_noray.scheduler import Channel, Worker
+from rlinf_noray.scheduler.dynamic_scheduler.utils import (
     get_scheduler_channel,
     get_scheduler_request_queue,
     get_scheduler_response_queue,
     get_valid_dp_sizes,
 )
-from rlinf.utils.data_iter_utils import (
+from rlinf_noray.utils.data_iter_utils import (
     get_iterator_k_split,
     get_last_rank,
     get_reverse_idx,
     get_seqlen_balanced_partitions,
     split_dynamic_batch_size,
 )
-from rlinf.utils.distributed import (
+from rlinf_noray.utils.distributed import (
     RolloutDataBalance,
     all_reduce_int,
     broadcast_tensor_within_pp,
@@ -67,15 +67,15 @@ from rlinf.utils.distributed import (
     vocab_parallel_entropy_and_log_probs,
     vocab_parallel_log_probs_from_logits,
 )
-from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
-from rlinf.utils.resharding.mcore_weight_reshard import MegatronCoreWeightReshard
-from rlinf.utils.resharding.reshard_config import ReshardConfig
-from rlinf.utils.train_utils import (
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement, PlacementMode
+from rlinf_noray.utils.resharding.mcore_weight_reshard import MegatronCoreWeightReshard
+from rlinf_noray.utils.resharding.reshard_config import ReshardConfig
+from rlinf_noray.utils.train_utils import (
     set_eval,
     set_sync_funcs,
     set_train,
 )
-from rlinf.utils.utils import (
+from rlinf_noray.utils.utils import (
     clear_memory,
     configure_batch_sizes,
     cpu_dict,
@@ -85,7 +85,7 @@ from rlinf.utils.utils import (
     seq_mean_token_mean,
     seq_mean_token_sum,
 )
-from rlinf.workers.rollout.utils import RankMapper
+from rlinf_noray.workers.rollout.utils import RankMapper
 
 try:
     from params_resharding import nccl_group_recreate, resharding_init

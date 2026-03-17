@@ -26,7 +26,7 @@ try:
 except ImportError:
     torch = None
 
-from rlinf.envs.utils import put_info_on_image, tile_images
+from rlinf_noray.envs.utils import put_info_on_image, tile_images
 
 
 class RecordVideo(gym.Wrapper):

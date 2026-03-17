@@ -26,9 +26,9 @@ from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import JointState
 from serl_franka_controllers.msg import ZeroJacobian
 
-from rlinf.envs.realworld.common.ros import ROSController
-from rlinf.scheduler import Cluster, NodePlacementStrategy, Worker
-from rlinf.utils.logging import get_logger
+from rlinf_noray.envs.realworld.common.ros import ROSController
+from rlinf_noray.scheduler import Cluster, NodePlacementStrategy, Worker
+from rlinf_noray.utils.logging import get_logger
 
 from .franka_robot_state import FrankaRobotState
 

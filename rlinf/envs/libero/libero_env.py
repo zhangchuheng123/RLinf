@@ -16,7 +16,7 @@ import copy
 import os
 from typing import Optional, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 from libero.libero import get_libero_path

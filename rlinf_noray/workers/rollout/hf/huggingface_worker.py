@@ -21,20 +21,20 @@ import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
-from rlinf.config import SupportedModel
-from rlinf.data.embodied_io_struct import (
+from rlinf_noray.config import SupportedModel
+from rlinf_noray.data.embodied_io_struct import (
     ChunkStepResult,
     EmbodiedRolloutResult,
     EnvOutput,
     Trajectory,
 )
-from rlinf.models import get_model
-from rlinf.models.embodiment.base_policy import BasePolicy
-from rlinf.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
-from rlinf.utils.comm_mapping import CommMapper
-from rlinf.utils.metric_utils import compute_split_num
-from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.utils.utils import get_model_weights_id
+from rlinf_noray.models import get_model
+from rlinf_noray.models.embodiment.base_policy import BasePolicy
+from rlinf_noray.scheduler import Channel, Cluster, CollectiveGroupOptions, Worker
+from rlinf_noray.utils.comm_mapping import CommMapper
+from rlinf_noray.utils.metric_utils import compute_split_num
+from rlinf_noray.utils.placement import HybridComponentPlacement
+from rlinf_noray.utils.utils import get_model_weights_id
 
 
 class MultiStepRolloutWorker(Worker):

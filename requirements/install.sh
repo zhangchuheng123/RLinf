@@ -587,6 +587,28 @@ install_maniskill_libero_env() {
     echo "export PYTHONPATH=$(realpath "$libero_dir"):\$PYTHONPATH" >> "$VENV_DIR/bin/activate"
     uv pip install git+${GITHUB_PREFIX}https://github.com/haosulab/ManiSkill.git@v3.0.0b22
 
+    # Post-install environment setup for cleaner runtime logs.
+    python - <<'PY'
+import pathlib
+import shutil
+
+import robosuite
+
+robosuite_root = pathlib.Path(robosuite.__path__[0])
+macros_path = robosuite_root / "macros.py"
+macros_private_path = robosuite_root / "macros_private.py"
+
+if macros_private_path.exists():
+    print(f"[install] robosuite macros already exists: {macros_private_path}")
+elif macros_path.exists():
+    shutil.copy2(macros_path, macros_private_path)
+    print(f"[install] created robosuite macros: {macros_private_path}")
+else:
+    print(f"[install] robosuite macros.py not found at {macros_path}")
+PY
+
+    uv pip install PyOpenGL-accelerate
+
     # Maniskill assets
     bash $SCRIPT_DIR/embodied/download_assets.sh --assets maniskill
 }

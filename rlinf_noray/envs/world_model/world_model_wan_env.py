@@ -25,9 +25,9 @@ from diffsynth.models.reward_model import ResnetRewModel, TaskEmbedResnetRewMode
 from diffsynth.pipelines.wan_video_new import ModelConfig, WanVideoPipeline
 from PIL import Image
 
-from rlinf.data.datasets.world_model import NpyTrajectoryDatasetWrapper
-from rlinf.envs.utils import recursive_to_device
-from rlinf.envs.world_model.base_world_env import BaseWorldEnv
+from rlinf_noray.data.datasets.world_model import NpyTrajectoryDatasetWrapper
+from rlinf_noray.envs.utils import recursive_to_device
+from rlinf_noray.envs.world_model.base_world_env import BaseWorldEnv
 
 __all__ = ["WanEnv"]
 

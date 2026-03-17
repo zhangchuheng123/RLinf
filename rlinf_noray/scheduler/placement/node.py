@@ -26,7 +26,7 @@ class NodePlacementStrategy(PlacementStrategy):
 
     Example::
 
-        >>> from rlinf.scheduler import (
+        >>> from rlinf_noray.scheduler import (
         ...     Cluster,
         ...     Worker,
         ...     NodePlacementStrategy,

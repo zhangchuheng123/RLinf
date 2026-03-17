@@ -19,7 +19,7 @@ import gymnasium as gym
 import torch
 from omegaconf import open_dict
 
-from rlinf.envs.isaaclab.venv import SubProcIsaacLabEnv
+from rlinf_noray.envs.isaaclab.venv import SubProcIsaacLabEnv
 
 
 class IsaaclabBaseEnv(gym.Env):

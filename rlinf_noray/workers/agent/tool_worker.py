@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 
-from rlinf.scheduler import Channel, Worker
+from rlinf_noray.scheduler import Channel, Worker
 
 
 @dataclass

@@ -19,9 +19,9 @@ from typing import Any
 import aiohttp
 from omegaconf import DictConfig
 
-from rlinf.data.tool_call.tool_io_struct import ToolChannelRequest, ToolChannelResponse
-from rlinf.scheduler import Channel
-from rlinf.workers.agent.tool_worker import ToolWorker
+from rlinf_noray.data.tool_call.tool_io_struct import ToolChannelRequest, ToolChannelResponse
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.workers.agent.tool_worker import ToolWorker
 
 
 class AsyncSearchClient:

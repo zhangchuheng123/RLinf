@@ -14,7 +14,7 @@
 
 from omegaconf import DictConfig
 
-from rlinf.scheduler.worker.worker import Worker
+from rlinf_noray.scheduler.worker.worker import Worker
 
 
 def get_actor_worker(cfg: DictConfig) -> Worker:

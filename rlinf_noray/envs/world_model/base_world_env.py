@@ -21,7 +21,7 @@ from typing import Optional, Union
 
 import torch
 
-from rlinf.scheduler import WorkerInfo
+from rlinf_noray.scheduler import WorkerInfo
 
 
 class BaseWorldEnv(ABC):

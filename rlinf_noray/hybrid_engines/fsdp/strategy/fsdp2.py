@@ -20,21 +20,21 @@ import torch.nn as nn
 from torch.distributed.device_mesh import DeviceMesh
 from torch.optim import Optimizer
 
-from rlinf.config import torch_dtype_from_precision
-from rlinf.hybrid_engines.fsdp import (
+from rlinf_noray.config import torch_dtype_from_precision
+from rlinf_noray.hybrid_engines.fsdp import (
     CPUOffloadPolicy,
     FSDPModule,
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
-from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
-from rlinf.hybrid_engines.fsdp.utils import (
+from rlinf_noray.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
+from rlinf_noray.hybrid_engines.fsdp.utils import (
     FSDPVersion,
     apply_fsdp2_to_model,
     clip_grad_by_total_norm_,
     get_grad_norm,
 )
-from rlinf.utils.utils import clear_memory
+from rlinf_noray.utils.utils import clear_memory
 
 
 class FSDP2Strategy(FSDPStrategyBase):

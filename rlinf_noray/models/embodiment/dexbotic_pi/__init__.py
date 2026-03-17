@@ -29,10 +29,10 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     from dexbotic.tokenization.process import Pi0Tokenization
     from transformers import AutoTokenizer
 
-    from rlinf.models.embodiment.dexbotic_pi.dexbotic_pi_policy import (
+    from rlinf_noray.models.embodiment.dexbotic_pi.dexbotic_pi_policy import (
         DexboticPi0ForRLActionPrediction,
     )
-    from rlinf.utils.logging import get_logger
+    from rlinf_noray.utils.logging import get_logger
 
     logger = get_logger()
 

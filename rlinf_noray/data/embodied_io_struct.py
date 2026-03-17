@@ -20,7 +20,7 @@ import torch
 if TYPE_CHECKING:
     pass
 
-from rlinf.utils.nested_dict_process import (
+from rlinf_noray.utils.nested_dict_process import (
     put_tensor_device,
     split_dict_to_chunk,
     stack_list_of_dict_tensor,

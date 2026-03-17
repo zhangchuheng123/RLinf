@@ -3,11 +3,14 @@ defaults:
   - env/libero_10@env.eval
   - model/smolvla@actor.model
   - training_backend/fsdp@actor.fsdp_config
+  - _self_
   - override hydra/job_logging: stdout
 
 hydra:
   run:
     dir: .
+  job:
+    chdir: false
   output_subdir: null
   searchpath:
     - file://${oc.env:EMBODIED_PATH}/config/
@@ -29,7 +32,7 @@ runner:
   max_steps: -1
 
   only_eval: False
-  val_check_interval: -1
+  val_check_interval: 1
   save_interval: 40
 
   resume_dir: null

@@ -19,7 +19,7 @@ import openpi.transforms as _transforms
 from openpi.training.config import DataConfig, DataConfigFactory, ModelTransformFactory
 from typing_extensions import override
 
-from rlinf.models.embodiment.openpi.policies import robocasa_policy
+from rlinf_noray.models.embodiment.openpi.policies import robocasa_policy
 
 
 @dataclasses.dataclass(frozen=True)

@@ -22,8 +22,8 @@ from omegaconf import DictConfig
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
-from rlinf.data.datasets.item import DatasetItem
-from rlinf.data.utils import batch_pad_to_fixed_len
+from rlinf_noray.data.datasets.item import DatasetItem
+from rlinf_noray.data.utils import batch_pad_to_fixed_len
 
 
 def get_tool_schemas():

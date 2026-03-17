@@ -22,9 +22,9 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from rlinf.envs.calvin import CalvinBenchmark, make_env
-from rlinf.envs.calvin.venv import ReconfigureSubprocEnv
-from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
+from rlinf_noray.envs.calvin import CalvinBenchmark, make_env
+from rlinf_noray.envs.calvin.venv import ReconfigureSubprocEnv
+from rlinf_noray.envs.utils import list_of_dict_to_dict_of_list, to_tensor
 
 
 class CalvinEnv(gym.Env):

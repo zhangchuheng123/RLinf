@@ -17,10 +17,10 @@ import torch
 from omegaconf import DictConfig
 from torch.utils import _pytree
 
-from rlinf.config import SupportedModel
-from rlinf.models.embodiment.base_policy import ForwardType
-from rlinf.utils.pytree import register_pytree_dataclasses
-from rlinf.workers.sft.fsdp_sft_worker import FSDPSftWorker
+from rlinf_noray.config import SupportedModel
+from rlinf_noray.models.embodiment.base_policy import ForwardType
+from rlinf_noray.utils.pytree import register_pytree_dataclasses
+from rlinf_noray.workers.sft.fsdp_sft_worker import FSDPSftWorker
 
 
 class FSDPVlaSftWorker(FSDPSftWorker):
@@ -31,7 +31,7 @@ class FSDPVlaSftWorker(FSDPSftWorker):
         if SupportedModel(self.cfg.actor.model.model_type) in [SupportedModel.OPENPI]:
             import openpi.training.data_loader as openpi_data_loader
 
-            from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+            from rlinf_noray.models.embodiment.openpi.dataconfig import get_openpi_config
 
             config = get_openpi_config(
                 self.cfg.actor.model.openpi.config_name,

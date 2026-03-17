@@ -28,7 +28,7 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
     """
 
     if cfg.input_type == "state":
-        from rlinf.models.embodiment.flow_policy.flow_policy import (
+        from rlinf_noray.models.embodiment.flow_policy.flow_policy import (
             FlowStateConfig,
             FlowStatePolicy,
         )
@@ -37,7 +37,7 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
         model_config.update_from_dict(OmegaConf.to_container(cfg, resolve=True))
         model = FlowStatePolicy(model_config)
     elif cfg.input_type == "mixed":
-        from rlinf.models.embodiment.flow_policy.flow_policy import (
+        from rlinf_noray.models.embodiment.flow_policy.flow_policy import (
             FlowConfig,
             FlowPolicy,
         )

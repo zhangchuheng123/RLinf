@@ -16,7 +16,7 @@ import cv2
 from mani_skill.utils import io_utils
 from mani_skill.utils.registration import register_env
 
-from rlinf.envs.maniskill.tasks.put_on_in_scene_multi import (
+from rlinf_noray.envs.maniskill.tasks.put_on_in_scene_multi import (
     CARROT_DATASET_DIR,
     PutOnPlateInScene25MainV3,
 )

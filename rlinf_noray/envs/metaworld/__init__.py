@@ -13,7 +13,7 @@
 # limitations under the License.
 import os
 
-from rlinf.envs.metaworld.utils import load_prompt_from_json
+from rlinf_noray.envs.metaworld.utils import load_prompt_from_json
 
 
 class MetaWorldBenchmark:

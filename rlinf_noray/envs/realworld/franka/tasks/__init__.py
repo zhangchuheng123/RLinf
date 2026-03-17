@@ -14,11 +14,11 @@
 
 from gymnasium.envs.registration import register
 
-from rlinf.envs.realworld.franka.tasks.bottle import BottleEnv as BottleEnv
-from rlinf.envs.realworld.franka.tasks.franka_bin_relocation import (
+from rlinf_noray.envs.realworld.franka.tasks.bottle import BottleEnv as BottleEnv
+from rlinf_noray.envs.realworld.franka.tasks.franka_bin_relocation import (
     FrankaBinRelocationEnv as FrankaBinRelocationEnv,
 )
-from rlinf.envs.realworld.franka.tasks.peg_insertion_env import (
+from rlinf_noray.envs.realworld.franka.tasks.peg_insertion_env import (
     PegInsertionEnv as PegInsertionEnv,
 )
 

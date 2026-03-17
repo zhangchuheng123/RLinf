@@ -22,18 +22,18 @@ from omegaconf.dictconfig import DictConfig
 from torch.utils.data import Dataset, RandomSampler, SequentialSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
-from rlinf.data.io_struct import RolloutRequest
-from rlinf.scheduler import Channel
-from rlinf.utils.data_iter_utils import split_list
-from rlinf.utils.distributed import ScopedTimer
-from rlinf.utils.metric_logger import MetricLogger
-from rlinf.utils.placement import ModelParallelEvalComponentPlacement
-from rlinf.utils.timers import Timer
-from rlinf.workers.reward.reward_worker import RewardWorker
+from rlinf_noray.data.io_struct import RolloutRequest
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.utils.data_iter_utils import split_list
+from rlinf_noray.utils.distributed import ScopedTimer
+from rlinf_noray.utils.metric_logger import MetricLogger
+from rlinf_noray.utils.placement import ModelParallelEvalComponentPlacement
+from rlinf_noray.utils.timers import Timer
+from rlinf_noray.workers.reward.reward_worker import RewardWorker
 
 if typing.TYPE_CHECKING:
-    from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
-    from rlinf.workers.rollout.vllm.vllm_worker import VLLMWorker
+    from rlinf_noray.workers.rollout.sglang.sglang_worker import SGLangWorker
+    from rlinf_noray.workers.rollout.vllm.vllm_worker import VLLMWorker
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -92,7 +92,7 @@ class ReasoningEvalRunner:
         """
         self.train_dataset, self.val_dataset = train_dataset, val_dataset
         if collate_fn is None:
-            from rlinf.data.datasets import collate_fn
+            from rlinf_noray.data.datasets import collate_fn
 
         # Use a sampler to facilitate checkpoint resumption.
         # If shuffling is enabled in the data configuration, create a random sampler.

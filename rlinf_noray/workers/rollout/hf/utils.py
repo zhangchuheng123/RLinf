@@ -16,7 +16,7 @@ from typing import Union
 
 import torch
 
-from rlinf.utils.nested_dict_process import copy_dict_tensor
+from rlinf_noray.utils.nested_dict_process import copy_dict_tensor
 
 
 def init_real_obs(next_extracted_obs: Union[torch.Tensor, dict]):

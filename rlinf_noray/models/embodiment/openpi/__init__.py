@@ -26,8 +26,8 @@ def get_model(cfg: DictConfig, torch_dtype=None):
     import safetensors
     from openpi.training import checkpoints as _checkpoints
 
-    from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
-    from rlinf.models.embodiment.openpi.openpi_action_model import (
+    from rlinf_noray.models.embodiment.openpi.dataconfig import get_openpi_config
+    from rlinf_noray.models.embodiment.openpi.openpi_action_model import (
         OpenPi0Config,
         OpenPi0ForRLActionPrediction,
     )

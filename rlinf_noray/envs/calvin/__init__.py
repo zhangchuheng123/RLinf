@@ -19,7 +19,7 @@ import hydra
 from calvin_agent.evaluation.utils import get_env_state_for_initial_condition
 from omegaconf import OmegaConf
 
-from rlinf.envs.calvin.utils import get_sequences
+from rlinf_noray.envs.calvin.utils import get_sequences
 
 ENV_CFG_DIR = Path(__file__).parent / "calvin_cfg/"
 

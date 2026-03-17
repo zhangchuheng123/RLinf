@@ -17,11 +17,11 @@ import warnings
 from multiprocessing import connection
 from typing import Any, Callable, Optional, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 from habitat.core.env import RLEnv
 
-from rlinf.envs.venv import (
+from rlinf_noray.envs.venv import (
     BaseVectorEnv,
     CloudpickleWrapper,
     EnvWorker,

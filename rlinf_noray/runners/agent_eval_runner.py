@@ -24,19 +24,19 @@ from omegaconf.dictconfig import DictConfig
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from rlinf.data.io_struct import RolloutResult
-from rlinf.runners.reasoning_eval_runner import ReasoningEvalRunner
-from rlinf.scheduler import Channel
-from rlinf.scheduler import WorkerGroupFuncResult as Handle
-from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.utils.runner_utils import local_mkdir_safe
-from rlinf.workers.agent.agent_loop import AgentLoopWorker
-from rlinf.workers.agent.tool_worker import ToolChannelInfo, ToolWorker, ToolWorkerInfo
-from rlinf.workers.reward.reward_worker import RewardWorker
+from rlinf_noray.data.io_struct import RolloutResult
+from rlinf_noray.runners.reasoning_eval_runner import ReasoningEvalRunner
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.scheduler import WorkerGroupFuncResult as Handle
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.utils.runner_utils import local_mkdir_safe
+from rlinf_noray.workers.agent.agent_loop import AgentLoopWorker
+from rlinf_noray.workers.agent.tool_worker import ToolChannelInfo, ToolWorker, ToolWorkerInfo
+from rlinf_noray.workers.reward.reward_worker import RewardWorker
 
 if typing.TYPE_CHECKING:
-    from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
-    from rlinf.workers.rollout.vllm.vllm_worker import VLLMWorker
+    from rlinf_noray.workers.rollout.sglang.sglang_worker import SGLangWorker
+    from rlinf_noray.workers.rollout.vllm.vllm_worker import VLLMWorker
 
 logging.getLogger().setLevel(logging.INFO)
 

@@ -109,7 +109,7 @@ class Worker(metaclass=WorkerMeta):
     Example::
 
         >>> import torch
-        >>> from rlinf.scheduler import Cluster, Worker
+        >>> from rlinf_noray.scheduler import Cluster, Worker
         >>>
         >>> class MyWorker(Worker):
         ...     def __init__(self):
@@ -143,7 +143,7 @@ class Worker(metaclass=WorkerMeta):
 
         >>> import asyncio
         >>> import torch
-        >>> from rlinf.scheduler import Cluster, Worker
+        >>> from rlinf_noray.scheduler import Cluster, Worker
         >>> SEND_GROUP_NAME = "send_worker_group"
         >>> RECV_GROUP_NAME = "recv_worker_group"
         >>>

@@ -16,7 +16,7 @@
 import torch
 from megatron.core import parallel_state
 
-from rlinf.config import SupportedModel, get_supported_model
+from rlinf_noray.config import SupportedModel, get_supported_model
 
 
 def get_tp_reshard_fn(model_type: str):

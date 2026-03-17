@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from rlinf.algorithms.rewards.code import CodeRewardOffline
-from rlinf.algorithms.rewards.math import MathReward
-from rlinf.algorithms.rewards.rstar2 import Rstar2Reward
-from rlinf.algorithms.rewards.searchr1 import SearchR1Reward
-from rlinf.algorithms.rewards.vqa import VQAReward
+from rlinf_noray.algorithms.rewards.code import CodeRewardOffline
+from rlinf_noray.algorithms.rewards.math import MathReward
+from rlinf_noray.algorithms.rewards.rstar2 import Rstar2Reward
+from rlinf_noray.algorithms.rewards.searchr1 import SearchR1Reward
+from rlinf_noray.algorithms.rewards.vqa import VQAReward
 
 
 def register_reward(name: str, reward_class: type):

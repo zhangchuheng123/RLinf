@@ -15,7 +15,7 @@
 import gymnasium as gym
 import torch
 
-from rlinf.envs.isaaclab.utils import quat2axisangle_torch
+from rlinf_noray.envs.isaaclab.utils import quat2axisangle_torch
 
 from ..isaaclab_env import IsaaclabBaseEnv
 

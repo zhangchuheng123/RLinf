@@ -34,8 +34,8 @@ from mani_skill.utils.structs.types import SimConfig
 from sapien.physx import PhysxMaterial
 from transforms3d.euler import euler2quat, mat2euler
 
-from rlinf.envs.maniskill.tasks.panda_table_agent import PandaBridgeDatasetFlatTable
-from rlinf.envs.maniskill.tasks.pose_utils import (
+from rlinf_noray.envs.maniskill.tasks.panda_table_agent import PandaBridgeDatasetFlatTable
+from rlinf_noray.envs.maniskill.tasks.pose_utils import (
     matrix2pose_batch_torch,
     pose2matrix_batch_torch,
     pose2matrix_torch,

@@ -29,7 +29,7 @@ from sglang.srt.utils import (
     set_ulimit,
 )
 
-from rlinf.utils.patcher import Patcher
+from rlinf_noray.utils.patcher import Patcher
 
 from .io_struct import (
     AbortGenerationInput,

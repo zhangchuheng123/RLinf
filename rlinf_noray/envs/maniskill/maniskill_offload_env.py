@@ -19,14 +19,14 @@ from typing import Optional
 import torch
 import torch.multiprocessing as mp
 
-from rlinf.envs.maniskill.maniskill_env import ManiskillEnv
-from rlinf.envs.maniskill.utils import (
+from rlinf_noray.envs.maniskill.maniskill_env import ManiskillEnv
+from rlinf_noray.envs.maniskill.utils import (
     cleanup_cuda_tensors,
     get_batch_rng_state,
     recursive_to_own,
     set_batch_rng_state,
 )
-from rlinf.envs.utils import recursive_to_device
+from rlinf_noray.envs.utils import recursive_to_device
 
 
 class EnvOffloadMixin:
@@ -185,7 +185,7 @@ def _maniskill_worker_main(
     result_queue,
     state_buffer: Optional[bytes],
 ):
-    from rlinf.utils.omega_resolver import omegaconf_register
+    from rlinf_noray.utils.omega_resolver import omegaconf_register
 
     omegaconf_register()
 

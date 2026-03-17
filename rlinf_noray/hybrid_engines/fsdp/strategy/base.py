@@ -31,16 +31,16 @@ from torch.distributed.tensor import DTensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
-from rlinf.hybrid_engines.fsdp import FSDP, FSDPModule
-from rlinf.hybrid_engines.fsdp.strategy.checkpoint import Checkpoint
-from rlinf.hybrid_engines.fsdp.utils import (
+from rlinf_noray.hybrid_engines.fsdp import FSDP, FSDPModule
+from rlinf_noray.hybrid_engines.fsdp.strategy.checkpoint import Checkpoint
+from rlinf_noray.hybrid_engines.fsdp.utils import (
     FSDPVersion,
 )
-from rlinf.utils.utils import clear_memory
+from rlinf_noray.utils.utils import clear_memory
 
 if TYPE_CHECKING:
-    from rlinf.workers.actor.fsdp_actor_worker import FSDPActor
-    from rlinf.workers.inference.fsdp_inference_worker import FSDPInference
+    from rlinf_noray.workers.actor.fsdp_actor_worker import FSDPActor
+    from rlinf_noray.workers.inference.fsdp_inference_worker import FSDPInference
 
 
 class FSDPStrategyBase(ABC):

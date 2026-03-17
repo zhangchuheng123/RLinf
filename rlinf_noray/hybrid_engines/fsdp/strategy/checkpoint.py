@@ -25,9 +25,9 @@ from torch.distributed.checkpoint.stateful import Stateful
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
-from rlinf.hybrid_engines.fsdp import FSDP, FSDPModule
-from rlinf.hybrid_engines.fsdp.utils import FSDPVersion, to_local_if_dtensor
-from rlinf.utils.utils import get_rng_state, set_rng_state
+from rlinf_noray.hybrid_engines.fsdp import FSDP, FSDPModule
+from rlinf_noray.hybrid_engines.fsdp.utils import FSDPVersion, to_local_if_dtensor
+from rlinf_noray.utils.utils import get_rng_state, set_rng_state
 
 
 class Checkpoint(Stateful):

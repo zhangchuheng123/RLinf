@@ -28,7 +28,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from omegaconf import DictConfig
 
-from rlinf.data.tool_call.tool_io_struct import (
+from rlinf_noray.data.tool_call.tool_io_struct import (
     MCPRequest,
     MCPRequestType,
     MCPResponse,
@@ -36,8 +36,8 @@ from rlinf.data.tool_call.tool_io_struct import (
     ToolChannelRequest,
     ToolChannelResponse,
 )
-from rlinf.scheduler import Channel
-from rlinf.workers.agent.tool_worker import ToolWorker
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.workers.agent.tool_worker import ToolWorker
 
 
 class FileSystemMCPSession:

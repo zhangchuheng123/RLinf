@@ -24,8 +24,8 @@ if TYPE_CHECKING:
     from vllm.outputs import CompletionOutput
     from vllm.outputs import RequestOutput as VllmRequestOutput
 
-from rlinf.data.utils import batch_pad_to_fixed_len
-from rlinf.utils.data_iter_utils import (
+from rlinf_noray.data.utils import batch_pad_to_fixed_len
+from rlinf_noray.utils.data_iter_utils import (
     get_iterator_k_split,
     merge_list,
     merge_tensor,

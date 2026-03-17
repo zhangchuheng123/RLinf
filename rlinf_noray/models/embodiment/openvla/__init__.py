@@ -28,7 +28,7 @@ from transformers import (
 def get_model_config_and_input_processor(cfg: DictConfig):
     from prismatic.extern.hf.configuration_prismatic import OpenVLAConfig
 
-    from rlinf.models.embodiment.prismatic.processing_prismatic import (
+    from rlinf_noray.models.embodiment.prismatic.processing_prismatic import (
         PrismaticImageProcessor,
         PrismaticProcessor,
     )
@@ -77,7 +77,7 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
             norm_stats.update(new_norm_stats)
             setattr(actor_model_config, "norm_stats", norm_stats)
 
-    from rlinf.models.embodiment.openvla.openvla_action_model import (
+    from rlinf_noray.models.embodiment.openvla.openvla_action_model import (
         OpenVLAForRLActionPrediction,
     )
 

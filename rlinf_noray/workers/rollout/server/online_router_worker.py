@@ -26,9 +26,9 @@ from fastapi.responses import StreamingResponse
 from omegaconf.dictconfig import DictConfig
 from pydantic import BaseModel
 
-from rlinf.scheduler import Worker
-from rlinf.utils.placement import ComponentPlacement
-from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
+from rlinf_noray.scheduler import Worker
+from rlinf_noray.utils.placement import ComponentPlacement
+from rlinf_noray.workers.rollout.sglang.sglang_worker import SGLangWorker
 
 
 class CompleteRequest(BaseModel):

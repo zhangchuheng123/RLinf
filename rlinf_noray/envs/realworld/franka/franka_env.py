@@ -24,13 +24,13 @@ import gymnasium as gym
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from rlinf.envs.realworld.common.camera import Camera, CameraInfo
-from rlinf.envs.realworld.common.video_player import VideoPlayer
-from rlinf.scheduler import (
+from rlinf_noray.envs.realworld.common.camera import Camera, CameraInfo
+from rlinf_noray.envs.realworld.common.video_player import VideoPlayer
+from rlinf_noray.scheduler import (
     FrankaHWInfo,
     WorkerInfo,
 )
-from rlinf.utils.logging import get_logger
+from rlinf_noray.utils.logging import get_logger
 
 from .franka_robot_state import FrankaRobotState
 from .utils import construct_adjoint_matrix, construct_homogeneous_matrix, quat_slerp

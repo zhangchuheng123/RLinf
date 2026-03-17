@@ -20,10 +20,10 @@ from omegaconf import DictConfig
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
-from rlinf.data.datasets.item import DatasetItem
-from rlinf.data.datasets.math import MathDataset
-from rlinf.data.datasets.rstar2 import Rstar2Dataset
-from rlinf.data.datasets.vlm import VLMDatasetRegistry
+from rlinf_noray.data.datasets.item import DatasetItem
+from rlinf_noray.data.datasets.math import MathDataset
+from rlinf_noray.data.datasets.rstar2 import Rstar2Dataset
+from rlinf_noray.data.datasets.vlm import VLMDatasetRegistry
 
 
 def create_rl_dataset(

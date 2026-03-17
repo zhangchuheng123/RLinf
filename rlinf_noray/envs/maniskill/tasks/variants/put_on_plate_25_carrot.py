@@ -14,7 +14,7 @@
 
 from mani_skill.utils.registration import register_env
 
-from rlinf.envs.maniskill.tasks.put_on_in_scene_multi import (
+from rlinf_noray.envs.maniskill.tasks.put_on_in_scene_multi import (
     PutOnPlateInScene25MainV3,
 )
 

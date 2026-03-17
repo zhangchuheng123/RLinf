@@ -19,11 +19,11 @@ from typing import Optional
 from omegaconf.dictconfig import DictConfig
 from tqdm import tqdm
 
-from rlinf.scheduler import WorkerGroupFuncResult as Handle
-from rlinf.utils.distributed import ScopedTimer
-from rlinf.utils.metric_logger import MetricLogger
-from rlinf.utils.runner_utils import check_progress
-from rlinf.workers.sft.fsdp_sft_worker import FSDPSftWorker
+from rlinf_noray.scheduler import WorkerGroupFuncResult as Handle
+from rlinf_noray.utils.distributed import ScopedTimer
+from rlinf_noray.utils.metric_logger import MetricLogger
+from rlinf_noray.utils.runner_utils import check_progress
+from rlinf_noray.workers.sft.fsdp_sft_worker import FSDPSftWorker
 
 
 class SFTRunner:

@@ -17,7 +17,7 @@ from omegaconf import DictConfig, OmegaConf
 
 
 def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
-    from rlinf.models.embodiment.cnn_policy.cnn_policy import CNNConfig, CNNPolicy
+    from rlinf_noray.models.embodiment.cnn_policy.cnn_policy import CNNConfig, CNNPolicy
 
     model_config = CNNConfig()
     model_config.update_from_dict(OmegaConf.to_container(cfg, resolve=True))

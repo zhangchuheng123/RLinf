@@ -62,7 +62,7 @@ class Channel:
         >>> import os
         >>> import asyncio
         >>> import torch
-        >>> from rlinf.scheduler import (
+        >>> from rlinf_noray.scheduler import (
         ...     Worker,
         ...     Cluster,
         ...     PackedPlacementStrategy,

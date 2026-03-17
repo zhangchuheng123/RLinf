@@ -28,15 +28,15 @@ from prismatic.vla.constants import (
 from torch.nn.utils.rnn import pad_sequence
 from transformers.generation import TopKLogitsWarper
 
-from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
-from rlinf.models.embodiment.modules.value_head import ValueHead
-from rlinf.models.embodiment.openvla_oft.openvla_utils import (
+from rlinf_noray.models.embodiment.base_policy import BasePolicy, ForwardType
+from rlinf_noray.models.embodiment.modules.value_head import ValueHead
+from rlinf_noray.models.embodiment.openvla_oft.openvla_utils import (
     find_checkpoint_file,
     load_component_state_dict,
     normalize_proprio,
 )
-from rlinf.utils.torch_functionals import pad_tensor_to_length
-from rlinf.utils.utils import (
+from rlinf_noray.utils.torch_functionals import pad_tensor_to_length
+from rlinf_noray.utils.utils import (
     compute_entropy_from_logits,
     compute_logprobs_from_logits,
 )

@@ -33,8 +33,8 @@ if package_version is None:
     raise ValueError(f"sglang version {package_version} not supported")
 elif package_version >= parse("0.4.4") and package_version <= parse("0.5.2rc2"):
     sglang_version = package_version
-    from rlinf.hybrid_engines.sglang.common import io_struct
-    from rlinf.hybrid_engines.sglang.common.sgl_engine import (
+    from rlinf_noray.hybrid_engines.sglang.common import io_struct
+    from rlinf_noray.hybrid_engines.sglang.common.sgl_engine import (
         Engine,
     )
 else:

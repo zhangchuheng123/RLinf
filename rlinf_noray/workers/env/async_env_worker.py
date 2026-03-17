@@ -18,9 +18,9 @@ from collections import defaultdict
 import torch
 from omegaconf.omegaconf import DictConfig
 
-from rlinf.data.embodied_io_struct import EnvOutput
-from rlinf.scheduler import Channel
-from rlinf.workers.env.env_worker import EnvWorker
+from rlinf_noray.data.embodied_io_struct import EnvOutput
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.workers.env.env_worker import EnvWorker
 
 
 class AsyncEnvWorker(EnvWorker):

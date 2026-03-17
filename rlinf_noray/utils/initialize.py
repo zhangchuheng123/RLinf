@@ -36,7 +36,7 @@ from omegaconf import open_dict
 from omegaconf.dictconfig import DictConfig
 from omegaconf.omegaconf import OmegaConf
 
-from rlinf.config import torch_dtype_from_precision
+from rlinf_noray.config import torch_dtype_from_precision
 
 
 def extract_selected_fields(cfg: DictConfig) -> DictConfig:

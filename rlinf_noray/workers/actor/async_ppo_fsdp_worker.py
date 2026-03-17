@@ -19,13 +19,13 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-from rlinf.algorithms.registry import calculate_adv_and_returns, policy_loss
-from rlinf.config import SupportedModel
-from rlinf.utils.distributed import all_reduce_dict, masked_normalization
-from rlinf.utils.metric_utils import append_to_dict, compute_rollout_metrics
-from rlinf.utils.nested_dict_process import put_tensor_device, split_dict_to_chunk
-from rlinf.utils.utils import clear_memory, masked_mean, reshape_entropy
-from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
+from rlinf_noray.algorithms.registry import calculate_adv_and_returns, policy_loss
+from rlinf_noray.config import SupportedModel
+from rlinf_noray.utils.distributed import all_reduce_dict, masked_normalization
+from rlinf_noray.utils.metric_utils import append_to_dict, compute_rollout_metrics
+from rlinf_noray.utils.nested_dict_process import put_tensor_device, split_dict_to_chunk
+from rlinf_noray.utils.utils import clear_memory, masked_mean, reshape_entropy
+from rlinf_noray.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
 
 
 def flatten_rollout_batch_for_train(

@@ -29,9 +29,9 @@ from sglang.srt.managers.scheduler import (
     run_scheduler_process as _run_scheduler_process,
 )
 
-from rlinf.scheduler import Worker, WorkerAddress
-from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
-from rlinf.workers.rollout.utils import (
+from rlinf_noray.scheduler import Worker, WorkerAddress
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement, PlacementMode
+from rlinf_noray.workers.rollout.utils import (
     RankMapper,
 )
 
@@ -574,7 +574,7 @@ def validate_weight_diff(model, weight_norm_dict):
 
 
 def run_scheduler_process(*args, **kwargs):
-    from rlinf.utils.patcher import Patcher
+    from rlinf_noray.utils.patcher import Patcher
 
     Patcher.clear()
     Patcher.add_patch(

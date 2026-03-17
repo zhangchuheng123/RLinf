@@ -27,7 +27,7 @@ except ImportError:
 from torch.distributed import ProcessGroup, ReduceOp
 from typing_extensions import Self
 
-from rlinf.utils.timers import NamedTimer
+from rlinf_noray.utils.timers import NamedTimer
 
 
 def compute_rollout_metrics_dynamic(

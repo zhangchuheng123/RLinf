@@ -32,6 +32,26 @@ source .venv/bin/activate
 To deactivate the virtual environment, simply run:
 ```shell
 deactivate
+```
+
+For `maniskill_libero`, `install.sh` now performs post-install environment setup automatically to reduce runtime warning spam:
+
+- runs `robosuite/scripts/setup_macros.py` (creates `macros_private.py`)
+- installs `PyOpenGL-accelerate`
+- runs a quick import-based post-check
+
+Optional environment switches before installation:
+
+```shell
+# Default: 1 (run robosuite macro setup)
+export MANISKILL_LIBERO_SETUP_MACROS=1
+
+# Default: 1 (install OpenGL acceleration package)
+export MANISKILL_LIBERO_INSTALL_OPENGL_ACCELERATE=1
+
+# Default: 0 (keep gym-notices installed)
+export MANISKILL_LIBERO_SILENCE_GYM_NOTICE=0
+```
 
 To install the reasoning (Megatron + SGLang/vLLM) stack instead, run:
 ```shell
@@ -41,5 +61,4 @@ bash requirements/install.sh agentic
 You can override the default virtual environment directory using `--venv`. For example:
 ```shell
 bash requirements/install.sh embodied --model openpi --env maniskill_libero --venv openpi-venv
-```
 ```

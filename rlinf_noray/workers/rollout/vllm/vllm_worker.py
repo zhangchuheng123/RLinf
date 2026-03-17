@@ -28,14 +28,14 @@ from vllm.sampling_params import SamplingParams
 from vllm.utils import Counter
 from vllm.v1.engine.async_llm import AsyncLLM as AsyncLLMEngine
 
-from rlinf.config import torch_dtype_from_precision
-from rlinf.data.io_struct import RolloutRequest, RolloutResult, SeqGroupInfo
-from rlinf.scheduler import Channel, Worker
-from rlinf.scheduler.dynamic_scheduler.manager import RolloutScalingScheduler
-from rlinf.scheduler.dynamic_scheduler.utils import get_scheduler_channel
-from rlinf.utils.data_process import process_image_data
-from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.workers.rollout.utils import RunningStatusManager, print_vllm_outputs
+from rlinf_noray.config import torch_dtype_from_precision
+from rlinf_noray.data.io_struct import RolloutRequest, RolloutResult, SeqGroupInfo
+from rlinf_noray.scheduler import Channel, Worker
+from rlinf_noray.scheduler.dynamic_scheduler.manager import RolloutScalingScheduler
+from rlinf_noray.scheduler.dynamic_scheduler.utils import get_scheduler_channel
+from rlinf_noray.utils.data_process import process_image_data
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.workers.rollout.utils import RunningStatusManager, print_vllm_outputs
 
 from . import VLLMExecutor
 

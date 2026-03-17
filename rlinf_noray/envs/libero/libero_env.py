@@ -16,7 +16,7 @@ import copy
 import os
 from typing import Optional, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 from libero.libero import get_libero_path
@@ -24,14 +24,14 @@ from libero.libero.benchmark import Benchmark
 from libero.libero.envs import OffScreenRenderEnv
 from omegaconf.omegaconf import OmegaConf
 
-from rlinf.envs.libero.utils import (
+from rlinf_noray.envs.libero.utils import (
     get_benchmark_overridden,
     get_libero_image,
     get_libero_wrist_image,
     quat2axisangle,
 )
-from rlinf.envs.libero.venv import ReconfigureSubprocEnv
-from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
+from rlinf_noray.envs.libero.venv import ReconfigureSubprocEnv
+from rlinf_noray.envs.utils import list_of_dict_to_dict_of_list, to_tensor
 
 
 class LiberoEnv(gym.Env):

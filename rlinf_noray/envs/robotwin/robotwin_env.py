@@ -23,7 +23,7 @@ import torch.multiprocessing as mp
 from omegaconf import OmegaConf
 from PIL import Image
 
-from rlinf.envs.utils import center_crop_image, list_of_dict_to_dict_of_list
+from rlinf_noray.envs.utils import center_crop_image, list_of_dict_to_dict_of_list
 
 __all__ = ["RoboTwinEnv"]
 

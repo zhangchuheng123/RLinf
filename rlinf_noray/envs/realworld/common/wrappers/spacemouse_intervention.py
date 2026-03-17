@@ -17,7 +17,7 @@ import time
 import gymnasium as gym
 import numpy as np
 
-from rlinf.envs.realworld.common.spacemouse.spacemouse_expert import SpaceMouseExpert
+from rlinf_noray.envs.realworld.common.spacemouse.spacemouse_expert import SpaceMouseExpert
 
 
 class SpacemouseIntervention(gym.ActionWrapper):

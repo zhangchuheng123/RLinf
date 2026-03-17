@@ -25,8 +25,8 @@ from typing import Optional
 import numpy as np
 import torch
 
-from rlinf.data.embodied_io_struct import Trajectory
-from rlinf.utils.logging import get_logger
+from rlinf_noray.data.embodied_io_struct import Trajectory
+from rlinf_noray.utils.logging import get_logger
 
 
 def clone_dict_of_tensors(obj):

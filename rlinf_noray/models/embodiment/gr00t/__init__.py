@@ -19,7 +19,7 @@ from omegaconf import DictConfig
 def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
     from pathlib import Path
 
-    from rlinf.utils.patcher import Patcher
+    from rlinf_noray.utils.patcher import Patcher
 
     Patcher.clear()
     Patcher.add_patch(
@@ -34,10 +34,10 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
 
     from gr00t.experiment.data_config import load_data_config
 
-    from rlinf.models.embodiment.gr00t.gr00t_action_model import (
+    from rlinf_noray.models.embodiment.gr00t.gr00t_action_model import (
         GR00T_N1_5_ForRLActionPrediction,
     )
-    from rlinf.models.embodiment.gr00t.utils import replace_dropout_with_identity
+    from rlinf_noray.models.embodiment.gr00t.utils import replace_dropout_with_identity
 
     if cfg.embodiment_tag == "libero_franka" or cfg.embodiment_tag == "isaaclab_franka":
         data_config = load_data_config(

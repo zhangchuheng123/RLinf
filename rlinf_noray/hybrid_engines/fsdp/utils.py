@@ -40,8 +40,8 @@ from torch.distributed.fsdp.wrap import (
 from torch.optim import Optimizer
 from transformers.trainer_pt_utils import get_module_class_from_name
 
-from rlinf.config import SupportedModel
-from rlinf.hybrid_engines.fsdp import (
+from rlinf_noray.config import SupportedModel
+from rlinf_noray.hybrid_engines.fsdp import (
     BackwardPrefetch,
     CPUOffloadPolicy,
     DTensor,
@@ -49,7 +49,7 @@ from rlinf.hybrid_engines.fsdp import (
     ShardingStrategy,
     fully_shard,
 )
-from rlinf.scheduler import Worker
+from rlinf_noray.scheduler import Worker
 
 
 class FSDPVersion(str, Enum):
@@ -130,7 +130,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
     # Build policies list
     policies = []
 
-    from rlinf.models.embodiment.modules.resnet_utils import ResNet10
+    from rlinf_noray.models.embodiment.modules.resnet_utils import ResNet10
 
     resnet_policy = functools.partial(_module_wrap_policy, module_classes={ResNet10})
     policies.append(resnet_policy)
@@ -167,7 +167,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
     ):
         from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy
 
-        from rlinf.models.embodiment.modules.resnet_utils import ResNetEncoder
+        from rlinf_noray.models.embodiment.modules.resnet_utils import ResNetEncoder
 
         encoder_policy = functools.partial(
             _module_wrap_policy, module_classes={ResNetEncoder}
@@ -182,7 +182,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
         )
 
     if hasattr(module, "value_head"):
-        from rlinf.models.embodiment.modules.value_head import ValueHead
+        from rlinf_noray.models.embodiment.modules.value_head import ValueHead
 
         value_head_policy = functools.partial(
             _module_wrap_policy, module_classes={ValueHead}
@@ -190,7 +190,7 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False, model_type=None):
         policies.append(value_head_policy)
 
     if hasattr(module, "q_head"):
-        from rlinf.models.embodiment.modules.q_head import MultiCrossQHead, MultiQHead
+        from rlinf_noray.models.embodiment.modules.q_head import MultiCrossQHead, MultiQHead
 
         if isinstance(module.q_head, MultiCrossQHead):
             q_head_policy = functools.partial(

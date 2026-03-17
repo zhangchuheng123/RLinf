@@ -42,7 +42,7 @@ from habitat.utils.visualizations import maps as habitat_maps
 from numpy import ndarray
 from torch import Tensor
 
-from rlinf.envs.habitat.extensions import maps
+from rlinf_noray.envs.habitat.extensions import maps
 
 
 def observations_to_image(

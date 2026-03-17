@@ -15,8 +15,8 @@
 import numpy as np
 import torch
 
-from rlinf.config import SupportedModel
-from rlinf.envs import SupportedEnvType
+from rlinf_noray.config import SupportedModel
+from rlinf_noray.envs import SupportedEnvType
 
 
 def prepare_actions_for_maniskill(

@@ -80,7 +80,7 @@ class BasePolicy(ABC):
         )
 
     def release_cuda_graph(self):
-        from rlinf.utils.cuda_graph import CUDAGraphManager
+        from rlinf_noray.utils.cuda_graph import CUDAGraphManager
 
         if self.is_cuda_graph_enabled():
             self.cuda_graph_manager: CUDAGraphManager

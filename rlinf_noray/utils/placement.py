@@ -17,7 +17,7 @@ from enum import Enum, auto
 
 from omegaconf import DictConfig
 
-from rlinf.scheduler import (
+from rlinf_noray.scheduler import (
     Cluster,
     ComponentPlacement,
     PackedPlacementStrategy,

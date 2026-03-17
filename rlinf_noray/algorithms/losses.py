@@ -16,9 +16,9 @@ from typing import Callable, Optional
 
 import torch
 
-from rlinf.algorithms.registry import register_policy_loss
-from rlinf.algorithms.utils import huber_loss
-from rlinf.utils.utils import masked_mean, masked_mean_ratio
+from rlinf_noray.algorithms.registry import register_policy_loss
+from rlinf_noray.algorithms.utils import huber_loss
+from rlinf_noray.utils.utils import masked_mean, masked_mean_ratio
 
 
 def compute_decoupled_ppo_actor_loss(

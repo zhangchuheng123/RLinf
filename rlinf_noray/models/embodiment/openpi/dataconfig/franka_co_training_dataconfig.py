@@ -21,7 +21,7 @@ import openpi.transforms as _transforms
 from openpi.training.config import DataConfig, DataConfigFactory, ModelTransformFactory
 from typing_extensions import override
 
-from rlinf.models.embodiment.openpi.policies import franka_policy
+from rlinf_noray.models.embodiment.openpi.policies import franka_policy
 
 
 @dataclasses.dataclass(frozen=True)

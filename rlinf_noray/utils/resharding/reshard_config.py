@@ -17,7 +17,7 @@ from typing import Callable, Optional
 
 from megatron.core.transformer import TransformerConfig
 
-from rlinf.utils.convertor.utils import get_mg2hf_convertor
+from rlinf_noray.utils.convertor.utils import get_mg2hf_convertor
 
 from .utils import get_pp_reshard_fn, get_tp_reshard_fn, get_tpe_reshard_fn
 

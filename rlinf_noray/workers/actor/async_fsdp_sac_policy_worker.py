@@ -18,12 +18,12 @@ import threading
 
 import torch
 
-from rlinf.scheduler import Worker
-from rlinf.utils.metric_utils import (
+from rlinf_noray.scheduler import Worker
+from rlinf_noray.utils.metric_utils import (
     append_to_dict,
     compute_split_num,
 )
-from rlinf.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
+from rlinf_noray.workers.actor.fsdp_sac_policy_worker import EmbodiedSACFSDPPolicy
 
 
 class AsyncEmbodiedSACFSDPPolicy(EmbodiedSACFSDPPolicy):

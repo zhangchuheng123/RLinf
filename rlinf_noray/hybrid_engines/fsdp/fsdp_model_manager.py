@@ -24,19 +24,19 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
 
-from rlinf.config import SupportedModel, get_supported_model, torch_dtype_from_precision
-from rlinf.data.tokenizers import hf_tokenizer
-from rlinf.hybrid_engines.fsdp import (
+from rlinf_noray.config import SupportedModel, get_supported_model, torch_dtype_from_precision
+from rlinf_noray.data.tokenizers import hf_tokenizer
+from rlinf_noray.hybrid_engines.fsdp import (
     FSDP,
     FSDPModule,
 )
-from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
-from rlinf.hybrid_engines.fsdp.utils import (
+from rlinf_noray.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
+from rlinf_noray.hybrid_engines.fsdp.utils import (
     create_device_mesh,
     get_lr_scheduler,
 )
-from rlinf.utils.logging import get_logger
-from rlinf.utils.utils import warmup_optimizer_state
+from rlinf_noray.utils.logging import get_logger
+from rlinf_noray.utils.utils import warmup_optimizer_state
 
 warnings.filterwarnings(
     "ignore",

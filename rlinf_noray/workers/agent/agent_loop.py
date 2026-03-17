@@ -21,15 +21,15 @@ from uuid import uuid4
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
-from rlinf.data.io_struct import (
+from rlinf_noray.data.io_struct import (
     DynamicRolloutResult,
     RolloutRequest,
     RolloutResult,
 )
-from rlinf.scheduler import Channel, Worker
-from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.workers.agent.tool_worker import ToolChannelInfo
-from rlinf.workers.rollout.utils import green
+from rlinf_noray.scheduler import Channel, Worker
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.workers.agent.tool_worker import ToolChannelInfo
+from rlinf_noray.workers.rollout.utils import green
 
 
 @dataclass

@@ -47,23 +47,25 @@ def get_env_cls(env_type: str, env_cfg=None):
 
     if env_type == SupportedEnvType.MANISKILL:
         if env_cfg.get("enable_offload", False):
-            from rlinf.envs.maniskill.maniskill_offload_env import ManiskillOffloadEnv
+            from rlinf_noray.envs.maniskill.maniskill_offload_env import (
+                ManiskillOffloadEnv,
+            )
 
             return ManiskillOffloadEnv
         else:
-            from rlinf.envs.maniskill.maniskill_env import ManiskillEnv
+            from rlinf_noray.envs.maniskill.maniskill_env import ManiskillEnv
 
             return ManiskillEnv
     elif env_type == SupportedEnvType.LIBERO:
-        from rlinf.envs.libero.libero_env import LiberoEnv
+        from rlinf_noray.envs.libero.libero_env import LiberoEnv
 
         return LiberoEnv
     elif env_type == SupportedEnvType.ROBOTWIN:
-        from rlinf.envs.robotwin.robotwin_env import RoboTwinEnv
+        from rlinf_noray.envs.robotwin.robotwin_env import RoboTwinEnv
 
         return RoboTwinEnv
     elif env_type == SupportedEnvType.ISAACLAB:
-        from rlinf.envs.isaaclab import REGISTER_ISAACLAB_ENVS
+        from rlinf_noray.envs.isaaclab import REGISTER_ISAACLAB_ENVS
 
         if env_cfg is None:
             raise ValueError(
@@ -78,39 +80,39 @@ def get_env_cls(env_type: str, env_cfg=None):
         )
         return REGISTER_ISAACLAB_ENVS[task_id]
     elif env_type == SupportedEnvType.METAWORLD:
-        from rlinf.envs.metaworld.metaworld_env import MetaWorldEnv
+        from rlinf_noray.envs.metaworld.metaworld_env import MetaWorldEnv
 
         return MetaWorldEnv
     elif env_type == SupportedEnvType.BEHAVIOR:
-        from rlinf.envs.behavior.behavior_env import BehaviorEnv
+        from rlinf_noray.envs.behavior.behavior_env import BehaviorEnv
 
         return BehaviorEnv
     elif env_type == SupportedEnvType.CALVIN:
-        from rlinf.envs.calvin.calvin_gym_env import CalvinEnv
+        from rlinf_noray.envs.calvin.calvin_gym_env import CalvinEnv
 
         return CalvinEnv
     elif env_type == SupportedEnvType.ROBOCASA:
-        from rlinf.envs.robocasa.robocasa_env import RobocasaEnv
+        from rlinf_noray.envs.robocasa.robocasa_env import RobocasaEnv
 
         return RobocasaEnv
     elif env_type == SupportedEnvType.REALWORLD:
-        from rlinf.envs.realworld.realworld_env import RealWorldEnv
+        from rlinf_noray.envs.realworld.realworld_env import RealWorldEnv
 
         return RealWorldEnv
     elif env_type == SupportedEnvType.HABITAT:
-        from rlinf.envs.habitat.habitat_env import HabitatEnv
+        from rlinf_noray.envs.habitat.habitat_env import HabitatEnv
 
         return HabitatEnv
     elif env_type == SupportedEnvType.FRANKASIM:
-        from rlinf.envs.frankasim.frankasim_env import FrankaSimEnv
+        from rlinf_noray.envs.frankasim.frankasim_env import FrankaSimEnv
 
         return FrankaSimEnv
     elif env_type == SupportedEnvType.OPENSORAWM:
-        from rlinf.envs.world_model.world_model_opensora_env import OpenSoraEnv
+        from rlinf_noray.envs.world_model.world_model_opensora_env import OpenSoraEnv
 
         return OpenSoraEnv
     elif env_type == SupportedEnvType.WANWM:
-        from rlinf.envs.world_model.world_model_wan_env import WanEnv
+        from rlinf_noray.envs.world_model.world_model_wan_env import WanEnv
 
         return WanEnv
     else:

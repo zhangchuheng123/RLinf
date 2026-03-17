@@ -37,8 +37,8 @@ from vllm.v1.executor.multiproc_executor import (
 )
 from vllm.worker.worker_base import WorkerWrapperBase
 
-from rlinf.scheduler.manager.worker_manager import WorkerAddress
-from rlinf.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.scheduler.manager.worker_manager import WorkerAddress
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
 
 logger = init_logger(__name__)
 

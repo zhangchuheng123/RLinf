@@ -15,16 +15,16 @@
 
 from omegaconf import DictConfig
 
-from rlinf.scheduler import Worker
-from rlinf.scheduler.dynamic_scheduler.manager import (
+from rlinf_noray.scheduler import Worker
+from rlinf_noray.scheduler.dynamic_scheduler.manager import (
     ComponentManager,
     create_component_manager,
 )
-from rlinf.scheduler.dynamic_scheduler.utils import (
+from rlinf_noray.scheduler.dynamic_scheduler.utils import (
     get_global_scheduer_state,
     set_global_scheduer_state,
 )
-from rlinf.utils.placement import ComponentPlacement
+from rlinf_noray.utils.placement import ComponentPlacement
 
 
 class SchedulerWorker(Worker):

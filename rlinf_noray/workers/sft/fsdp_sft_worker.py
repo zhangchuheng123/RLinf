@@ -22,13 +22,13 @@ import torch
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from rlinf.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
-from rlinf.models import get_model
-from rlinf.scheduler import Cluster, Worker
-from rlinf.utils.distributed import all_reduce_dict
-from rlinf.utils.metric_utils import append_to_dict
-from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.utils.utils import clear_memory
+from rlinf_noray.hybrid_engines.fsdp.fsdp_model_manager import FSDPModelManager
+from rlinf_noray.models import get_model
+from rlinf_noray.scheduler import Cluster, Worker
+from rlinf_noray.utils.distributed import all_reduce_dict
+from rlinf_noray.utils.metric_utils import append_to_dict
+from rlinf_noray.utils.placement import HybridComponentPlacement
+from rlinf_noray.utils.utils import clear_memory
 
 
 class FSDPSftWorker(FSDPModelManager, Worker):

@@ -24,9 +24,9 @@ import metaworld
 import numpy as np
 import torch
 
-from rlinf.envs.metaworld import MetaWorldBenchmark
-from rlinf.envs.metaworld.venv import ReconfigureSubprocEnv
-from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
+from rlinf_noray.envs.metaworld import MetaWorldBenchmark
+from rlinf_noray.envs.metaworld.venv import ReconfigureSubprocEnv
+from rlinf_noray.envs.utils import list_of_dict_to_dict_of_list, to_tensor
 
 if not getattr(metaworld, "_has_registered_mw_envs", False):
     with warnings.catch_warnings():

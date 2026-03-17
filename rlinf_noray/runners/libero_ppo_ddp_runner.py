@@ -1,19 +1,24 @@
 import copy
 import os
+from pathlib import Path
+from textwrap import wrap
 from dataclasses import dataclass
 from typing import Any
 
+import imageio.v2 as imageio
 import numpy as np
 import torch
 import torch.distributed as dist
 from omegaconf import DictConfig, OmegaConf
+from PIL import Image, ImageDraw, ImageFont
 from torch.nn.parallel import DistributedDataParallel
 
-import rlinf.algorithms  # noqa: F401
-from rlinf.algorithms.registry import policy_loss
-from rlinf.envs import get_env_cls
-from rlinf.envs.action_utils import prepare_actions
-from rlinf.models import get_model
+import rlinf_noray.algorithms  # noqa: F401
+from rlinf_noray.algorithms.registry import policy_loss
+from rlinf_noray.envs import get_env_cls
+from rlinf_noray.envs.action_utils import prepare_actions
+from rlinf_noray.models import get_model
+from rlinf_noray.utils.metric_logger import MetricLogger
 
 
 @dataclass
@@ -97,6 +102,34 @@ class LiberoPPODDPNoRayRunner:
             worker_info=None,
         )
 
+        self.val_check_interval = int(cfg.runner.get("val_check_interval", -1))
+        self.only_eval = bool(cfg.runner.get("only_eval", False))
+        self.eval_env = None
+        self.eval_rollout_epoch = int(cfg.algorithm.get("eval_rollout_epoch", 1))
+        self.eval_chunk_steps = 0
+
+        if self.val_check_interval > 0 or self.only_eval:
+            eval_total_num_envs = int(cfg.env.eval.total_num_envs)
+            assert eval_total_num_envs % self.world_size == 0, (
+                f"env.eval.total_num_envs={eval_total_num_envs} must be divisible by world_size={self.world_size}"
+            )
+            eval_local_num_envs = eval_total_num_envs // self.world_size
+            eval_env_cfg = OmegaConf.create(
+                OmegaConf.to_container(cfg.env.eval, resolve=True)
+            )
+            eval_env_cfg.total_num_envs = eval_local_num_envs
+            eval_env_cls = get_env_cls(eval_env_cfg.env_type, eval_env_cfg)
+            self.eval_env = eval_env_cls(
+                cfg=eval_env_cfg,
+                num_envs=eval_local_num_envs,
+                seed_offset=self.rank,
+                total_num_processes=self.world_size,
+                worker_info=None,
+            )
+            self.eval_chunk_steps = int(
+                cfg.env.eval.max_steps_per_rollout_epoch
+            ) // int(cfg.actor.model.num_action_chunks)
+
         model_cfg = copy.deepcopy(cfg.actor.model)
         self.model = get_model(model_cfg)
         self.model.train()
@@ -126,6 +159,74 @@ class LiberoPPODDPNoRayRunner:
         self.chunk_steps = int(cfg.env.train.max_steps_per_rollout_epoch) // int(
             cfg.actor.model.num_action_chunks
         )
+        self.metric_logger = MetricLogger(cfg) if self.rank == 0 else None
+
+        eval_video_cfg = cfg.env.eval.get("video_cfg", {})
+        self.save_eval_video = bool(eval_video_cfg.get("save_video", False))
+        self.eval_video_base_dir = str(eval_video_cfg.get("video_base_dir", ""))
+
+    @staticmethod
+    def _to_uint8_hwc(img: Any) -> np.ndarray:
+        if isinstance(img, torch.Tensor):
+            arr = img.detach().cpu().numpy()
+        else:
+            arr = np.asarray(img)
+
+        if arr.ndim == 3 and arr.shape[0] in (1, 3) and arr.shape[-1] not in (1, 3):
+            arr = np.transpose(arr, (1, 2, 0))
+
+        if arr.dtype != np.uint8:
+            arr = arr.astype(np.float32)
+            if arr.max() <= 1.0:
+                arr = arr * 255.0
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+
+        if arr.ndim == 2:
+            arr = np.stack([arr] * 3, axis=-1)
+        if arr.ndim == 3 and arr.shape[-1] == 1:
+            arr = np.repeat(arr, 3, axis=-1)
+        return arr
+
+    @staticmethod
+    def _render_overlay_frame(main_image: Any, instruction: str, action: Any) -> np.ndarray:
+        frame = LiberoPPODDPNoRayRunner._to_uint8_hwc(main_image)
+        pil = Image.fromarray(frame)
+        draw = ImageDraw.Draw(pil)
+        font = ImageFont.load_default()
+
+        action_np = np.asarray(action, dtype=np.float32).reshape(-1)
+        action_text = "[" + ", ".join(f"{v:+.3f}" for v in action_np.tolist()) + "]"
+        lines = ["instruction:"] + (wrap(str(instruction), width=56) or [""])
+        lines += ["action:"] + (wrap(action_text, width=56) or [""])
+        text = "\n".join(lines)
+
+        bbox = draw.multiline_textbbox((0, 0), text, font=font, spacing=2)
+        pad = 6
+        left, top = 8, 8
+        right = left + (bbox[2] - bbox[0]) + 2 * pad
+        bottom = top + (bbox[3] - bbox[1]) + 2 * pad
+        draw.rectangle((left, top, right, bottom), fill=(0, 0, 0, 170))
+        draw.multiline_text((left + pad, top + pad), text, fill=(255, 255, 255), font=font, spacing=2)
+        return np.asarray(pil)
+
+    def _save_eval_videos(self, frames_by_env: list[list[np.ndarray]], epoch: int) -> None:
+        if not self.eval_video_base_dir:
+            return
+        base_dir = Path(self.eval_video_base_dir)
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        traj_offset = self.rank * len(frames_by_env)
+        for local_idx, frames in enumerate(frames_by_env):
+            if not frames:
+                continue
+            traj_idx = traj_offset + local_idx
+            out_path = base_dir / f"val_epoch_{epoch}_traj_{traj_idx:02d}.mp4"
+            imageio.mimsave(str(out_path), frames, fps=15)
+
+    def _reduce_sums(self, sums: torch.Tensor) -> torch.Tensor:
+        sums = sums.to(self.device, dtype=torch.float64)
+        dist.all_reduce(sums, op=dist.ReduceOp.SUM)
+        return sums
 
     def _pack_forward_inputs(self, rollout_result: dict[str, Any]) -> dict[str, Any]:
         if "forward_inputs" in rollout_result:
@@ -150,17 +251,34 @@ class LiberoPPODDPNoRayRunner:
             packed["prev_logprobs"] = _to_cpu(rollout_result["prev_logprobs"])
         return packed
 
-    def _collect_rollouts(self) -> list[RolloutSample]:
-        obs, _ = self.env.reset()
+    def _collect_rollouts(
+        self,
+        env,
+        rollout_epoch: int,
+        chunk_steps: int,
+        mode: str,
+        collect_samples: bool,
+        save_video: bool = False,
+        video_epoch: int = 0,
+    ) -> tuple[list[RolloutSample], dict[str, float]]:
+        
+        obs, _ = env.reset()
         samples: list[RolloutSample] = []
+        frames_by_env: list[list[np.ndarray]] = []
+        if save_video:
+            frames_by_env = [[] for _ in range(env.num_envs)]
 
-        for _ in range(self.rollout_epoch):
-            for _ in range(self.chunk_steps):
+        sums = torch.zeros(6, dtype=torch.float64)
+        # [sum_chunk_return, sum_step_reward, done_count, success_count, num_chunks, num_steps]
+
+        for _ in range(rollout_epoch):
+            for _ in range(chunk_steps):
                 with torch.no_grad():
                     raw_actions, rollout_result = self.ddp_model.module.predict_action_batch(
                         env_obs=obs,
-                        mode="train",
+                        mode=mode,
                     )
+                    # raw_actions: (num_envs, num_action_chunks, action_dim)
 
                 chunk_actions = torch.as_tensor(raw_actions)
                 chunk_actions = prepare_actions(
@@ -176,32 +294,70 @@ class LiberoPPODDPNoRayRunner:
                 if isinstance(chunk_actions, np.ndarray):
                     chunk_actions = torch.from_numpy(chunk_actions)
 
-                obs_list, chunk_rewards, chunk_terminations, chunk_truncations, _ = self.env.chunk_step(
-                    chunk_actions
-                )
+                obs_list, chunk_rewards, chunk_terminations, chunk_truncations, _ = \
+                    env.chunk_step(chunk_actions)
                 obs = obs_list[-1]
 
-                rewards = chunk_rewards.sum(dim=1).float().cpu()
+                if save_video:
+                    for step_idx, step_obs in enumerate(obs_list):
+                        main_images = step_obs.get("main_images", None)
+                        task_descs = step_obs.get("task_descriptions", None)
+                        if main_images is None or task_descs is None:
+                            continue
+                        step_actions = chunk_actions[:, step_idx]
+                        for env_idx in range(env.num_envs):
+                            frame = self._render_overlay_frame(
+                                main_image=main_images[env_idx],
+                                instruction=task_descs[env_idx],
+                                action=step_actions[env_idx],
+                            )
+                            frames_by_env[env_idx].append(frame)
+
+                chunk_returns = chunk_rewards.sum(dim=1).float().cpu()
                 dones = torch.logical_or(
                     chunk_terminations[:, -1], chunk_truncations[:, -1]
                 ).float().cpu()
+                success = chunk_terminations[:, -1].float().cpu()
 
-                old_logprobs = _reduce_to_batch(_to_cpu(rollout_result["prev_logprobs"]))
-                prev_values = _reduce_to_batch(_to_cpu(rollout_result["prev_values"]))
-                returns = rewards * (1.0 - dones)
+                sums[0] += float(chunk_returns.sum().item())
+                sums[1] += float(chunk_rewards.sum().item())
+                sums[2] += float(dones.sum().item())
+                sums[3] += float(success.sum().item())
+                sums[4] += float(chunk_returns.numel())
+                sums[5] += float(chunk_rewards.numel())
 
-                sample = RolloutSample(
-                    forward_inputs=self._pack_forward_inputs(rollout_result),
-                    old_logprobs=old_logprobs,
-                    prev_values=prev_values,
-                    returns=returns,
-                )
-                samples.append(sample)
+                if collect_samples:
+                    old_logprobs = _reduce_to_batch(_to_cpu(rollout_result["prev_logprobs"]))
+                    prev_values = _reduce_to_batch(_to_cpu(rollout_result["prev_values"]))
+                    returns = chunk_returns * (1.0 - dones)
 
-        return samples
+                    sample = RolloutSample(
+                        forward_inputs=self._pack_forward_inputs(rollout_result),
+                        old_logprobs=old_logprobs,
+                        prev_values=prev_values,
+                        returns=returns,
+                    )
+                    samples.append(sample)
 
-    def _train_one_epoch(self, samples: list[RolloutSample]) -> float:
+        sums = self._reduce_sums(sums)
+        num_chunks = max(float(sums[4].item()), 1.0)
+        num_steps = max(float(sums[5].item()), 1.0)
+        metrics = {
+            "chunk_return_mean": float(sums[0].item() / num_chunks),
+            "step_reward_mean": float(sums[1].item() / num_steps),
+            "done_rate": float(sums[2].item() / num_chunks),
+            "success_rate": float(sums[3].item() / num_chunks),
+            "num_chunks": float(sums[4].item()),
+        }
+        if save_video:
+            self._save_eval_videos(frames_by_env, video_epoch)
+        return samples, metrics
+
+    def _train_one_epoch(self, samples: list[RolloutSample]) -> dict[str, float]:
         loss_total = 0.0
+        value_total = 0.0
+        return_total = 0.0
+        adv_total = 0.0
         update_count = 0
 
         for _ in range(self.update_epoch):
@@ -245,24 +401,102 @@ class LiberoPPODDPNoRayRunner:
                 self.optimizer.step()
 
                 loss_total += float(loss.detach().item())
+                value_total += float(values.detach().mean().item())
+                return_total += float(returns.detach().mean().item())
+                adv_total += float(advantages.detach().mean().item())
                 update_count += 1
 
         assert update_count > 0, "No optimization steps were executed"
-        avg_loss = loss_total / update_count
-        loss_tensor = torch.tensor([avg_loss], dtype=torch.float32, device=self.device)
-        dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
-        avg_loss_all = float((loss_tensor / self.world_size).item())
-        return avg_loss_all
+        sums = torch.tensor(
+            [loss_total, value_total, return_total, adv_total, float(update_count)],
+            dtype=torch.float64,
+        )
+        sums = self._reduce_sums(sums)
+        global_updates = max(float(sums[4].item()), 1.0)
+        return {
+            "avg_loss": float(sums[0].item() / global_updates),
+            "value_mean": float(sums[1].item() / global_updates),
+            "return_mean": float(sums[2].item() / global_updates),
+            "adv_mean": float(sums[3].item() / global_updates),
+        }
+
+    def _evaluate(self, epoch: int = 0) -> dict[str, float]:
+        assert self.eval_env is not None
+        self.ddp_model.module.eval()
+        with torch.no_grad():
+            _, eval_metrics = self._collect_rollouts(
+                env=self.eval_env,
+                rollout_epoch=self.eval_rollout_epoch,
+                chunk_steps=self.eval_chunk_steps,
+                mode="eval",
+                collect_samples=False,
+                save_video=self.save_eval_video,
+                video_epoch=epoch,
+            )
+        self.ddp_model.module.train()
+        return {f"eval/{k}": v for k, v in eval_metrics.items()}
 
     def run(self) -> None:
-        for epoch in range(self.max_epochs):
-            samples = self._collect_rollouts()
-            avg_loss_all = self._train_one_epoch(samples)
+        if self.rank == 0 and self.val_check_interval <= 0 and not self.only_eval:
+            print(
+                "[noray][ddp] eval disabled because runner.val_check_interval <= 0",
+                flush=True,
+            )
+
+        if self.only_eval:
+            if self.eval_env is None:
+                raise ValueError("runner.only_eval=True requires eval env to be enabled")
+            eval_metrics = self._evaluate(epoch=0)
             if self.rank == 0:
+                self.metric_logger.log(eval_metrics, step=0)
+                self.metric_logger.finish()
+            dist.barrier()
+            dist.destroy_process_group()
+            return
+
+        for epoch in range(self.max_epochs):
+            samples, rollout_metrics = self._collect_rollouts(
+                env=self.env,
+                rollout_epoch=self.rollout_epoch,
+                chunk_steps=self.chunk_steps,
+                mode="train",
+                collect_samples=True,
+            )
+            train_metrics = self._train_one_epoch(samples)
+
+            eval_metrics = {}
+            if self.eval_env is not None and self.val_check_interval > 0:
+                if (epoch + 1) % self.val_check_interval == 0:
+                    eval_metrics = self._evaluate(epoch=epoch)
+
+            if self.rank == 0:
+                metrics_to_log = {
+                    "train/avg_loss": train_metrics["avg_loss"],
+                    "train/value_mean": train_metrics["value_mean"],
+                    "train/return_mean": train_metrics["return_mean"],
+                    "train/adv_mean": train_metrics["adv_mean"],
+                    "rollout/chunk_return_mean": rollout_metrics["chunk_return_mean"],
+                    "rollout/step_reward_mean": rollout_metrics["step_reward_mean"],
+                    "rollout/done_rate": rollout_metrics["done_rate"],
+                    "rollout/success_rate": rollout_metrics["success_rate"],
+                    "rollout/num_chunks": rollout_metrics["num_chunks"],
+                    "train/sample_count": len(samples),
+                }
+                metrics_to_log.update(eval_metrics)
+                self.metric_logger.log(
+                    metrics_to_log,
+                    step=epoch,
+                )
                 print(
-                    f"[noray][ddp] epoch={epoch} samples={len(samples)} avg_loss={avg_loss_all:.6f}",
+                    (
+                        f"[noray][ddp] epoch={epoch} samples={len(samples)} "
+                        f"avg_loss={train_metrics['avg_loss']:.6f} "
+                        f"rollout_success={rollout_metrics['success_rate']:.4f}"
+                    ),
                     flush=True,
                 )
 
         dist.barrier()
+        if self.rank == 0:
+            self.metric_logger.finish()
         dist.destroy_process_group()

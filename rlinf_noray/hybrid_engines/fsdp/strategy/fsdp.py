@@ -25,10 +25,10 @@ from torch.distributed.fsdp import (
 )
 from torch.optim import Optimizer
 
-from rlinf.config import torch_dtype_from_precision
-from rlinf.hybrid_engines.fsdp import FSDP
-from rlinf.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
-from rlinf.hybrid_engines.fsdp.utils import (
+from rlinf_noray.config import torch_dtype_from_precision
+from rlinf_noray.hybrid_engines.fsdp import FSDP
+from rlinf_noray.hybrid_engines.fsdp.strategy.base import FSDPStrategyBase
+from rlinf_noray.hybrid_engines.fsdp.utils import (
     FSDPVersion,
     get_backward_prefetch_strategy,
     get_fsdp_wrap_policy,
@@ -36,7 +36,7 @@ from rlinf.hybrid_engines.fsdp.utils import (
     get_sharding_strategy,
     init_fn,
 )
-from rlinf.utils.utils import clear_memory
+from rlinf_noray.utils.utils import clear_memory
 
 
 class FSDPStrategy(FSDPStrategyBase):

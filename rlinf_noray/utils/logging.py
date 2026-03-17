@@ -14,7 +14,7 @@
 
 
 def get_logger():
-    """Get the logger instance of the current worker."""
-    from rlinf.scheduler.worker import Worker
+    """Get a process-level logger for no-ray execution."""
+    import logging
 
-    return Worker.logger
+    return logging.getLogger("rlinf_noray")

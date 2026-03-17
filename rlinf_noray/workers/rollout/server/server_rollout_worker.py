@@ -25,10 +25,10 @@ from fastapi import FastAPI, Request, Response
 from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
-from rlinf.data.io_struct import (
+from rlinf_noray.data.io_struct import (
     RolloutResult,
 )
-from rlinf.scheduler import Channel, Worker
+from rlinf_noray.scheduler import Channel, Worker
 
 
 class TrainingDataStorage:

@@ -19,11 +19,11 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-from rlinf.algorithms.rewards import get_reward_class
-from rlinf.data.io_struct import RolloutResult
-from rlinf.data.tokenizers import hf_tokenizer
-from rlinf.scheduler import Channel, Worker
-from rlinf.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.algorithms.rewards import get_reward_class
+from rlinf_noray.data.io_struct import RolloutResult
+from rlinf_noray.data.tokenizers import hf_tokenizer
+from rlinf_noray.scheduler import Channel, Worker
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
 
 
 class RewardWorker(Worker):

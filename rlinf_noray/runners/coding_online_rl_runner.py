@@ -20,18 +20,18 @@ import pandas as pd
 from omegaconf.dictconfig import DictConfig
 from tqdm import tqdm
 
-from rlinf.scheduler import Channel
-from rlinf.scheduler import WorkerGroupFuncResult as Handle
-from rlinf.utils.distributed import ScopedTimer
-from rlinf.utils.metric_logger import MetricLogger
-from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.utils.runner_utils import check_progress
-from rlinf.utils.timers import Timer
-from rlinf.workers.actor.megatron_actor_worker import MegatronActor
-from rlinf.workers.inference.megatron_inference_worker import MegatronInference
-from rlinf.workers.rollout.server.online_router_worker import OnlineRouterWorker
-from rlinf.workers.rollout.server.server_rollout_worker import ServerRolloutWorker
-from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.scheduler import WorkerGroupFuncResult as Handle
+from rlinf_noray.utils.distributed import ScopedTimer
+from rlinf_noray.utils.metric_logger import MetricLogger
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.utils.runner_utils import check_progress
+from rlinf_noray.utils.timers import Timer
+from rlinf_noray.workers.actor.megatron_actor_worker import MegatronActor
+from rlinf_noray.workers.inference.megatron_inference_worker import MegatronInference
+from rlinf_noray.workers.rollout.server.online_router_worker import OnlineRouterWorker
+from rlinf_noray.workers.rollout.server.server_rollout_worker import ServerRolloutWorker
+from rlinf_noray.workers.rollout.sglang.sglang_worker import SGLangWorker
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -100,7 +100,7 @@ class CodingOnlineRLRunner:
                 self.cfg.actor.training_backend == "megatron"
                 and self.cfg.actor.megatron.use_hf_ckpt
             ):
-                from rlinf.utils.ckpt_convertor.megatron_convertor.convert_hf_to_mg import (
+                from rlinf_noray.utils.ckpt_convertor.megatron_convertor.convert_hf_to_mg import (
                     convert_hf_to_mg,
                 )
 

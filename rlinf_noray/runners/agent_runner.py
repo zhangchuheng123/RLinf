@@ -21,20 +21,20 @@ from omegaconf.dictconfig import DictConfig
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from rlinf.runners.reasoning_runner import ReasoningRunner
-from rlinf.scheduler import Channel
-from rlinf.scheduler import WorkerGroupFuncResult as Handle
-from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.utils.runner_utils import check_progress
-from rlinf.workers.actor.megatron_actor_worker import MegatronActor
-from rlinf.workers.agent.agent_loop import AgentLoopWorker
-from rlinf.workers.agent.tool_worker import ToolChannelInfo, ToolWorker, ToolWorkerInfo
-from rlinf.workers.inference.megatron_inference_worker import MegatronInference
-from rlinf.workers.reward.reward_worker import RewardWorker
+from rlinf_noray.runners.reasoning_runner import ReasoningRunner
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.scheduler import WorkerGroupFuncResult as Handle
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.utils.runner_utils import check_progress
+from rlinf_noray.workers.actor.megatron_actor_worker import MegatronActor
+from rlinf_noray.workers.agent.agent_loop import AgentLoopWorker
+from rlinf_noray.workers.agent.tool_worker import ToolChannelInfo, ToolWorker, ToolWorkerInfo
+from rlinf_noray.workers.inference.megatron_inference_worker import MegatronInference
+from rlinf_noray.workers.reward.reward_worker import RewardWorker
 
 if typing.TYPE_CHECKING:
-    from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
-    from rlinf.workers.rollout.vllm.vllm_worker import VLLMWorker
+    from rlinf_noray.workers.rollout.sglang.sglang_worker import SGLangWorker
+    from rlinf_noray.workers.rollout.vllm.vllm_worker import VLLMWorker
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -130,7 +130,7 @@ class AgentRunner(ReasoningRunner):
                 self.cfg.actor.training_backend == "megatron"
                 and self.cfg.actor.megatron.use_hf_ckpt
             ):
-                from rlinf.utils.ckpt_convertor.megatron_convertor.convert_hf_to_mg import (
+                from rlinf_noray.utils.ckpt_convertor.megatron_convertor.convert_hf_to_mg import (
                     convert_hf_to_mg,
                 )
 

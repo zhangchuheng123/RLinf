@@ -19,13 +19,13 @@ from typing import TYPE_CHECKING, Iterator, Optional
 import torch
 from omegaconf import DictConfig
 
-from rlinf.config import build_config, build_transformer_config
-from rlinf.data.tokenizers import hf_tokenizer
-from rlinf.utils.flops import FLOPSCalculator, ModelConfig
-from rlinf.utils.initialize import initialize_megatron, set_megatron_args
-from rlinf.utils.logging import get_logger
-from rlinf.utils.profiler import PyTorchProfiler, PyTorchProfilerFunc
-from rlinf.utils.utils import clear_memory
+from rlinf_noray.config import build_config, build_transformer_config
+from rlinf_noray.data.tokenizers import hf_tokenizer
+from rlinf_noray.utils.flops import FLOPSCalculator, ModelConfig
+from rlinf_noray.utils.initialize import initialize_megatron, set_megatron_args
+from rlinf_noray.utils.logging import get_logger
+from rlinf_noray.utils.profiler import PyTorchProfiler, PyTorchProfilerFunc
+from rlinf_noray.utils.utils import clear_memory
 
 from .utils import (
     postprocess_packed_seqs,

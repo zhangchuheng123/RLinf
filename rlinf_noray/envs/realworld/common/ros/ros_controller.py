@@ -22,7 +22,7 @@ import psutil
 import rospy
 from filelock import FileLock
 
-from rlinf.utils.logging import get_logger
+from rlinf_noray.utils.logging import get_logger
 
 
 class ROSController:

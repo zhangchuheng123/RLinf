@@ -26,11 +26,11 @@ from openpi.models import model as _model
 from openpi.models.pi0_config import Pi0Config
 from openpi.models_pytorch.pi0_pytorch import PI0Pytorch, make_att_2d_masks
 
-from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
-from rlinf.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
-from rlinf.models.embodiment.modules.value_head import ValueHead
-from rlinf.utils.logging import get_logger
-from rlinf.utils.nested_dict_process import copy_dict_tensor
+from rlinf_noray.models.embodiment.base_policy import BasePolicy, ForwardType
+from rlinf_noray.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
+from rlinf_noray.models.embodiment.modules.value_head import ValueHead
+from rlinf_noray.utils.logging import get_logger
+from rlinf_noray.utils.nested_dict_process import copy_dict_tensor
 
 
 @dataclass(frozen=True)
@@ -172,12 +172,12 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
 
         # ===== DSRL components initialization =====
         if self.config.use_dsrl:
-            from rlinf.models.embodiment.modules.compact_encoders import (
+            from rlinf_noray.models.embodiment.modules.compact_encoders import (
                 CompactMultiQHead,
                 CompactStateEncoder,
                 LightweightImageEncoder64,
             )
-            from rlinf.models.embodiment.modules.gaussian_policy import GaussianPolicy
+            from rlinf_noray.models.embodiment.modules.gaussian_policy import GaussianPolicy
 
             # Use explicit bfloat16 to match the backbone dtype that will be
             # loaded from the checkpoint later.  At __init__ time the backbone

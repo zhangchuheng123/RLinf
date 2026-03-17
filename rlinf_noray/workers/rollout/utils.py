@@ -22,9 +22,9 @@ from dataclasses import dataclass
 
 from omegaconf import DictConfig
 
-from rlinf.data.io_struct import SeqGroupInfo
-from rlinf.scheduler.worker.worker import Worker
-from rlinf.utils.placement import ModelParallelComponentPlacement, PlacementMode
+from rlinf_noray.data.io_struct import SeqGroupInfo
+from rlinf_noray.scheduler.worker.worker import Worker
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement, PlacementMode
 
 if typing.TYPE_CHECKING:
     from vllm.outputs import RequestOutput
@@ -327,11 +327,11 @@ def get_rollout_backend_worker(cfg: DictConfig) -> Worker:
         )
 
     if rollout_backend == "vllm":
-        from rlinf.workers.rollout.vllm.vllm_worker import VLLMWorker
+        from rlinf_noray.workers.rollout.vllm.vllm_worker import VLLMWorker
 
         return VLLMWorker
     elif rollout_backend == "sglang":
-        from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
+        from rlinf_noray.workers.rollout.sglang.sglang_worker import SGLangWorker
 
         return SGLangWorker
 

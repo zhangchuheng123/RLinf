@@ -23,11 +23,11 @@ from torch.distributed.checkpoint.state_dict import (
 )
 from torch.distributed.tensor import DTensor
 
-from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.utils.utils import (
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.utils.utils import (
     retrieve_model_state_dict_in_cpu,
 )
-from rlinf.workers.actor.fsdp_actor_worker import FSDPActor
+from rlinf_noray.workers.actor.fsdp_actor_worker import FSDPActor
 
 
 class FSDPInference(FSDPActor):

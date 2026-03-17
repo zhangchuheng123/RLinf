@@ -24,8 +24,8 @@ from omnigibson.learning.utils.eval_utils import (
 )
 from omnigibson.macros import gm
 
-from rlinf.envs.utils import list_of_dict_to_dict_of_list, to_tensor
-from rlinf.utils.logging import get_logger
+from rlinf_noray.envs.utils import list_of_dict_to_dict_of_list, to_tensor
+from rlinf_noray.utils.logging import get_logger
 
 # Make sure object states are enabled
 gm.HEADLESS = True

@@ -21,24 +21,24 @@ import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig
 
-from rlinf.config import SupportedModel
-from rlinf.data.embodied_io_struct import Trajectory
-from rlinf.data.replay_buffer import TrajectoryReplayBuffer
-from rlinf.models.embodiment.base_policy import ForwardType
-from rlinf.models.embodiment.modules.entropy_tunning import EntropyTemperature
-from rlinf.scheduler import Channel, Worker
-from rlinf.utils import drq
-from rlinf.utils.distributed import all_reduce_dict
-from rlinf.utils.metric_utils import (
+from rlinf_noray.config import SupportedModel
+from rlinf_noray.data.embodied_io_struct import Trajectory
+from rlinf_noray.data.replay_buffer import TrajectoryReplayBuffer
+from rlinf_noray.models.embodiment.base_policy import ForwardType
+from rlinf_noray.models.embodiment.modules.entropy_tunning import EntropyTemperature
+from rlinf_noray.scheduler import Channel, Worker
+from rlinf_noray.utils import drq
+from rlinf_noray.utils.distributed import all_reduce_dict
+from rlinf_noray.utils.metric_utils import (
     append_to_dict,
     compute_split_num,
 )
-from rlinf.utils.nested_dict_process import (
+from rlinf_noray.utils.nested_dict_process import (
     concat_batch,
     put_tensor_device,
     split_dict_to_chunk,
 )
-from rlinf.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
+from rlinf_noray.workers.actor.fsdp_actor_worker import EmbodiedFSDPActor
 
 
 class EmbodiedSACFSDPPolicy(EmbodiedFSDPActor):

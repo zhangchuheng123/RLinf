@@ -66,7 +66,7 @@ class MetricLogger:
         if "wandb" in self.logger_backends:
             import wandb
 
-            from rlinf.utils.logging import get_logger
+            from rlinf_noray.utils.logging import get_logger
 
             wandb_log_path = os.path.join(log_path, "wandb")
             os.makedirs(wandb_log_path, exist_ok=True)

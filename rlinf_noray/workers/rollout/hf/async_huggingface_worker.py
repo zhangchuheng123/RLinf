@@ -16,9 +16,9 @@ import asyncio
 
 from omegaconf.omegaconf import DictConfig
 
-from rlinf.data.embodied_io_struct import EmbodiedRolloutResult
-from rlinf.scheduler import Channel
-from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
+from rlinf_noray.data.embodied_io_struct import EmbodiedRolloutResult
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 
 class AsyncMultiStepRolloutWorker(MultiStepRolloutWorker):

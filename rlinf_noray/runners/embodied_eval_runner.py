@@ -14,18 +14,18 @@
 
 import typing
 
-from rlinf.scheduler import Channel
-from rlinf.scheduler import WorkerGroupFuncResult as Handle
-from rlinf.utils.distributed import ScopedTimer
-from rlinf.utils.logging import get_logger
-from rlinf.utils.metric_logger import MetricLogger
-from rlinf.utils.metric_utils import compute_evaluate_metrics
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.scheduler import WorkerGroupFuncResult as Handle
+from rlinf_noray.utils.distributed import ScopedTimer
+from rlinf_noray.utils.logging import get_logger
+from rlinf_noray.utils.metric_logger import MetricLogger
+from rlinf_noray.utils.metric_utils import compute_evaluate_metrics
 
 if typing.TYPE_CHECKING:
     from omegaconf.dictconfig import DictConfig
 
-    from rlinf.workers.env.env_worker import EnvWorker
-    from rlinf.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
+    from rlinf_noray.workers.env.env_worker import EnvWorker
+    from rlinf_noray.workers.rollout.hf.huggingface_worker import MultiStepRolloutWorker
 
 
 class EmbodiedEvalRunner:

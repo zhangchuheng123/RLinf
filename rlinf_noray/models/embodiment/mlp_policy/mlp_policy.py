@@ -17,10 +17,10 @@ import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
 
-from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
-from rlinf.models.embodiment.modules.q_head import MultiCrossQHead, MultiQHead
-from rlinf.models.embodiment.modules.utils import get_act_func, layer_init
-from rlinf.models.embodiment.modules.value_head import ValueHead
+from rlinf_noray.models.embodiment.base_policy import BasePolicy, ForwardType
+from rlinf_noray.models.embodiment.modules.q_head import MultiCrossQHead, MultiQHead
+from rlinf_noray.models.embodiment.modules.utils import get_act_func, layer_init
+from rlinf_noray.models.embodiment.modules.value_head import ValueHead
 
 
 class MLPPolicy(nn.Module, BasePolicy):
@@ -302,7 +302,7 @@ class MLPPolicy(nn.Module, BasePolicy):
         mode: str,
         calculate_values: bool,
     ):
-        from rlinf.utils.cuda_graph import GraphCaptureSpec
+        from rlinf_noray.utils.cuda_graph import GraphCaptureSpec
 
         device = next(self.parameters()).device
         dtype = next(self.parameters()).dtype
@@ -343,7 +343,7 @@ class MLPPolicy(nn.Module, BasePolicy):
         self.cuda_graph_manager.capture(spec)
 
     def capture_cuda_graph(self, train_batch_size: int, eval_batch_size: int):
-        from rlinf.utils.cuda_graph import CUDAGraphManager
+        from rlinf_noray.utils.cuda_graph import CUDAGraphManager
 
         if self.cuda_graph_manager is None:
             self.cuda_graph_manager = CUDAGraphManager()

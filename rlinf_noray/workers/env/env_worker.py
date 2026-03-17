@@ -19,13 +19,13 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-from rlinf.data.embodied_io_struct import EnvOutput
-from rlinf.envs import get_env_cls
-from rlinf.envs.action_utils import prepare_actions
-from rlinf.envs.wrappers import RecordVideo
-from rlinf.scheduler import Channel, Cluster, Worker
-from rlinf.utils.comm_mapping import CommMapper
-from rlinf.utils.placement import HybridComponentPlacement
+from rlinf_noray.data.embodied_io_struct import EnvOutput
+from rlinf_noray.envs import get_env_cls
+from rlinf_noray.envs.action_utils import prepare_actions
+from rlinf_noray.envs.wrappers import RecordVideo
+from rlinf_noray.scheduler import Channel, Cluster, Worker
+from rlinf_noray.utils.comm_mapping import CommMapper
+from rlinf_noray.utils.placement import HybridComponentPlacement
 
 
 class EnvWorker(Worker):

@@ -24,25 +24,25 @@ from torch.utils.data import Dataset, RandomSampler, SequentialSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
 
-from rlinf.data.io_struct import RolloutRequest
-from rlinf.scheduler import Channel
-from rlinf.scheduler import WorkerGroupFuncResult as Handle
-from rlinf.utils.data_iter_utils import split_list
-from rlinf.utils.distributed import ScopedTimer
-from rlinf.utils.metric_logger import MetricLogger
-from rlinf.utils.runner_utils import check_progress, local_mkdir_safe
-from rlinf.utils.timers import Timer
+from rlinf_noray.data.io_struct import RolloutRequest
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.scheduler import WorkerGroupFuncResult as Handle
+from rlinf_noray.utils.data_iter_utils import split_list
+from rlinf_noray.utils.distributed import ScopedTimer
+from rlinf_noray.utils.metric_logger import MetricLogger
+from rlinf_noray.utils.runner_utils import check_progress, local_mkdir_safe
+from rlinf_noray.utils.timers import Timer
 
 if typing.TYPE_CHECKING:
-    from rlinf.scheduler.dynamic_scheduler.scheduler_worker import SchedulerWorker
-    from rlinf.utils.placement import ModelParallelComponentPlacement
-    from rlinf.workers.actor.fsdp_actor_worker import FSDPActor
-    from rlinf.workers.actor.megatron_actor_worker import MegatronActor
-    from rlinf.workers.inference.fsdp_inference_worker import FSDPInference
-    from rlinf.workers.inference.megatron_inference_worker import MegatronInference
-    from rlinf.workers.reward.reward_worker import RewardWorker
-    from rlinf.workers.rollout.sglang.sglang_worker import SGLangWorker
-    from rlinf.workers.rollout.vllm.vllm_worker import VLLMWorker
+    from rlinf_noray.scheduler.dynamic_scheduler.scheduler_worker import SchedulerWorker
+    from rlinf_noray.utils.placement import ModelParallelComponentPlacement
+    from rlinf_noray.workers.actor.fsdp_actor_worker import FSDPActor
+    from rlinf_noray.workers.actor.megatron_actor_worker import MegatronActor
+    from rlinf_noray.workers.inference.fsdp_inference_worker import FSDPInference
+    from rlinf_noray.workers.inference.megatron_inference_worker import MegatronInference
+    from rlinf_noray.workers.reward.reward_worker import RewardWorker
+    from rlinf_noray.workers.rollout.sglang.sglang_worker import SGLangWorker
+    from rlinf_noray.workers.rollout.vllm.vllm_worker import VLLMWorker
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -120,7 +120,7 @@ class ReasoningRunner:
         """
         self.train_dataset, self.val_dataset = train_dataset, val_dataset
         if collate_fn is None:
-            from rlinf.data.datasets import collate_fn
+            from rlinf_noray.data.datasets import collate_fn
 
         # Use a sampler to facilitate checkpoint resumption.
         # If shuffling is enabled in the data configuration, create a random sampler.
@@ -180,7 +180,7 @@ class ReasoningRunner:
                 self.cfg.actor.training_backend == "megatron"
                 and self.cfg.actor.megatron.use_hf_ckpt
             ):
-                from rlinf.utils.ckpt_convertor.megatron_convertor.convert_hf_to_mg import (
+                from rlinf_noray.utils.ckpt_convertor.megatron_convertor.convert_hf_to_mg import (
                     convert_hf_to_mg,
                 )
 

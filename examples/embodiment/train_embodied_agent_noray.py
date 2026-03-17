@@ -13,7 +13,8 @@ mp.set_start_method("spawn", force=True)
     version_base="1.1", config_path="config", config_name="libero_10_ppo_openpi_pi05"
 )
 def main(cfg) -> None:
-    print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2), flush=True)
+    
+    # print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2), flush=True)
 
     config_name = str(cfg.runner.logger.experiment_name).lower()
     allowed_configs = {

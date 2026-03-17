@@ -22,14 +22,14 @@ from uuid import uuid4
 import regex as re
 from omegaconf import DictConfig
 
-from rlinf.data.tool_call.tool_io_struct import (
+from rlinf_noray.data.tool_call.tool_io_struct import (
     ToolChannelRequest,
     ToolChannelResponse,
     ToolRequest,
     ToolResponse,
 )
-from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.workers.agent.agent_loop import AgentLoopOutput, AgentLoopWorker
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.workers.agent.agent_loop import AgentLoopOutput, AgentLoopWorker
 
 
 @dataclass

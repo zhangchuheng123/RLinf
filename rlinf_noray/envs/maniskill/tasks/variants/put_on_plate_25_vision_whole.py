@@ -19,11 +19,11 @@ from mani_skill.utils.geometry import rotation_conversions
 from mani_skill.utils.registration import register_env
 from mani_skill.utils.structs.pose import Pose
 
-from rlinf.envs.maniskill.tasks.put_on_in_scene_multi import (
+from rlinf_noray.envs.maniskill.tasks.put_on_in_scene_multi import (
     CARROT_DATASET_DIR,
     PutOnPlateInScene25MainV3,
 )
-from rlinf.envs.maniskill.tasks.variants.utils import (
+from rlinf_noray.envs.maniskill.tasks.variants.utils import (
     masks_to_boxes_pytorch,
 )
 

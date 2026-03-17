@@ -20,7 +20,7 @@ import shutil
 import torch
 from safetensors.torch import save_file
 
-from rlinf.config import SupportedModel
+from rlinf_noray.config import SupportedModel
 
 
 def get_model_save_helper(model_type: str):

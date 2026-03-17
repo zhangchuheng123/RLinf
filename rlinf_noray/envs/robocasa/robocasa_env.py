@@ -21,8 +21,8 @@ import robocasa  # noqa: F401 Robocasa must be imported to register envs
 import torch
 from omegaconf import OmegaConf
 
-from rlinf.envs.robocasa.venv import RobocasaSubprocEnv
-from rlinf.envs.utils import (
+from rlinf_noray.envs.robocasa.venv import RobocasaSubprocEnv
+from rlinf_noray.envs.utils import (
     list_of_dict_to_dict_of_list,
     to_tensor,
 )

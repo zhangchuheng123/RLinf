@@ -17,7 +17,7 @@ from omegaconf import DictConfig
 
 
 def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
-    from rlinf.models.embodiment.mlp_policy.mlp_policy import MLPPolicy
+    from rlinf_noray.models.embodiment.mlp_policy.mlp_policy import MLPPolicy
 
     model = MLPPolicy(
         cfg.obs_dim,

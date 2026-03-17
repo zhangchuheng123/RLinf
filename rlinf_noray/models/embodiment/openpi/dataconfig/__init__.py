@@ -26,34 +26,34 @@ from openpi.training.config import (
     TrainConfig,
 )
 
-from rlinf.models.embodiment.openpi.dataconfig.behavior_dataconfig import (
+from rlinf_noray.models.embodiment.openpi.dataconfig.behavior_dataconfig import (
     LeRobotBehaviorDataConfig,
 )
-from rlinf.models.embodiment.openpi.dataconfig.calvin_dataconfig import (
+from rlinf_noray.models.embodiment.openpi.dataconfig.calvin_dataconfig import (
     LeRobotCalvinDataConfig,
 )
-from rlinf.models.embodiment.openpi.dataconfig.franka_co_training_dataconfig import (
+from rlinf_noray.models.embodiment.openpi.dataconfig.franka_co_training_dataconfig import (
     LeRobotFrankaEEDataConfig,
 )
-from rlinf.models.embodiment.openpi.dataconfig.franka_dataconfig import (
+from rlinf_noray.models.embodiment.openpi.dataconfig.franka_dataconfig import (
     CustomDataConfig,
 )
-from rlinf.models.embodiment.openpi.dataconfig.gsenv_dataconfig import (
+from rlinf_noray.models.embodiment.openpi.dataconfig.gsenv_dataconfig import (
     LeRobotGSEnvDataConfig,
 )
-from rlinf.models.embodiment.openpi.dataconfig.libero_dataconfig import (
+from rlinf_noray.models.embodiment.openpi.dataconfig.libero_dataconfig import (
     LeRobotLiberoDataConfig,
 )
-from rlinf.models.embodiment.openpi.dataconfig.maniskill_dataconfig import (
+from rlinf_noray.models.embodiment.openpi.dataconfig.maniskill_dataconfig import (
     LeRobotManiSkillDataConfig,
 )
-from rlinf.models.embodiment.openpi.dataconfig.metaworld_dataconfig import (
+from rlinf_noray.models.embodiment.openpi.dataconfig.metaworld_dataconfig import (
     LeRobotMetaworldDataConfig,
 )
-from rlinf.models.embodiment.openpi.dataconfig.robocasa_dataconfig import (
+from rlinf_noray.models.embodiment.openpi.dataconfig.robocasa_dataconfig import (
     LeRobotRobocasaDataConfig,
 )
-from rlinf.models.embodiment.openpi.dataconfig.robotwin_aloha_dataconfig import (
+from rlinf_noray.models.embodiment.openpi.dataconfig.robotwin_aloha_dataconfig import (
     LeRobotAlohaDataConfig,
 )
 

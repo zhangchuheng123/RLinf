@@ -25,20 +25,20 @@ from sglang.srt.managers.io_struct import (
 from sglang.srt.server_args import ServerArgs
 from transformers import AutoTokenizer
 
-from rlinf.config import torch_dtype_from_precision
-from rlinf.data.io_struct import (
+from rlinf_noray.config import torch_dtype_from_precision
+from rlinf_noray.data.io_struct import (
     RolloutRequest,
     RolloutResult,
     SeqGroupInfo,
 )
-from rlinf.scheduler import Channel, Worker
-from rlinf.scheduler.dynamic_scheduler.manager import RolloutScalingScheduler
-from rlinf.scheduler.dynamic_scheduler.utils import (
+from rlinf_noray.scheduler import Channel, Worker
+from rlinf_noray.scheduler.dynamic_scheduler.manager import RolloutScalingScheduler
+from rlinf_noray.scheduler.dynamic_scheduler.utils import (
     get_scheduler_channel,
 )
-from rlinf.utils.placement import ModelParallelComponentPlacement
-from rlinf.workers.rollout.sglang import Engine, io_struct
-from rlinf.workers.rollout.utils import (
+from rlinf_noray.utils.placement import ModelParallelComponentPlacement
+from rlinf_noray.workers.rollout.sglang import Engine, io_struct
+from rlinf_noray.workers.rollout.utils import (
     MetaInfoStatsCollector,
     RolloutEngineStats,
     RunningStatusManager,

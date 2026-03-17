@@ -21,8 +21,8 @@ from typing import Any
 import torch
 from omegaconf import DictConfig
 
-from rlinf.config import SupportedModel
-from rlinf.workers.sft.fsdp_sft_worker import FSDPSftWorker
+from rlinf_noray.config import SupportedModel
+from rlinf_noray.workers.sft.fsdp_sft_worker import FSDPSftWorker
 
 
 class FSDPVlmSftWorker(FSDPSftWorker):
@@ -92,8 +92,8 @@ class FSDPVlmSftWorker(FSDPSftWorker):
         ]:
             from torch.utils.data import DataLoader, DistributedSampler
 
-            from rlinf.data.datasets import sft_collate_fn
-            from rlinf.data.datasets.vlm import VLMDatasetRegistry
+            from rlinf_noray.data.datasets import sft_collate_fn
+            from rlinf_noray.data.datasets.vlm import VLMDatasetRegistry
 
             # vlm sft before load dataloader should build the tokenizer
             if not hasattr(self, "tokenizer"):

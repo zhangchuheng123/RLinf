@@ -27,8 +27,8 @@ from dexbotic.model.pi0.pi0_arch import (
 from PIL import Image
 from transformers import DynamicCache
 
-from rlinf.models.embodiment.base_policy import BasePolicy
-from rlinf.utils.logging import get_logger
+from rlinf_noray.models.embodiment.base_policy import BasePolicy
+from rlinf_noray.utils.logging import get_logger
 
 
 class DexboticPi0ForRLActionPrediction(BasePolicy, Pi0ForCausalLM):

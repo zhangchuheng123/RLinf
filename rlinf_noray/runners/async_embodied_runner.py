@@ -19,18 +19,18 @@ from typing import TYPE_CHECKING
 
 from omegaconf.dictconfig import DictConfig
 
-from rlinf.runners.embodied_runner import EmbodiedRunner
-from rlinf.scheduler import Channel
-from rlinf.scheduler import WorkerGroupFuncResult as Handle
-from rlinf.utils.metric_utils import compute_evaluate_metrics
-from rlinf.utils.runner_utils import check_progress
+from rlinf_noray.runners.embodied_runner import EmbodiedRunner
+from rlinf_noray.scheduler import Channel
+from rlinf_noray.scheduler import WorkerGroupFuncResult as Handle
+from rlinf_noray.utils.metric_utils import compute_evaluate_metrics
+from rlinf_noray.utils.runner_utils import check_progress
 
 if TYPE_CHECKING:
-    from rlinf.workers.actor.async_fsdp_sac_policy_worker import (
+    from rlinf_noray.workers.actor.async_fsdp_sac_policy_worker import (
         AsyncEmbodiedSACFSDPPolicy,
     )
-    from rlinf.workers.env.async_env_worker import AsyncEnvWorker
-    from rlinf.workers.rollout.hf.async_huggingface_worker import (
+    from rlinf_noray.workers.env.async_env_worker import AsyncEnvWorker
+    from rlinf_noray.workers.rollout.hf.async_huggingface_worker import (
         AsyncMultiStepRolloutWorker,
     )
 
