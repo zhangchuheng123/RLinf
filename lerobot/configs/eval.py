@@ -36,6 +36,9 @@ class EvalPipelineConfig:
     output_dir: Path | None = None
     job_name: str | None = None
     seed: int | None = 1000
+    # Inference precision override for policy weights and compute path.
+    # Supported: "auto", "fp32", "bf16".
+    inference_precision: str = "auto"
     # Rename map for the observation to override the image and state keys
     rename_map: dict[str, str] = field(default_factory=dict)
     # Explicit consent to execute remote code from the Hub (required for hub environments).

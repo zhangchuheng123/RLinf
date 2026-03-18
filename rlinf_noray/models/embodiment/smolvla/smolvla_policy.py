@@ -39,7 +39,9 @@ RLinf LIBERO environment provides:
 """
 
 from typing import Any, Literal
+import hashlib
 import logging
+import os
 
 import numpy as np
 import torch
@@ -89,7 +91,8 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
             # TODO: 这个模型是否是微调过的 SmolVLA？
             self.policy = SmolVLAPolicy.from_pretrained(cfg.model_path)
 
-        self._sanitize_invalid_normalizer_stats()
+        self._validate_normalizer_stats()
+        self.policy_preprocessor, self.policy_postprocessor = self._build_policy_processors(cfg)
 
         self.action_dim = cfg.action_dim
         self.num_action_chunks = cfg.num_action_chunks
@@ -97,6 +100,7 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         self.image_keys: list[str] = self._resolve_image_keys(cfg)
         self.main_image_env_key: str = cfg.get("main_image_env_key", "main_images")
         self.wrist_image_env_key: str | None = cfg.get("wrist_image_env_key", None)
+        self.flip_libero_images: bool = cfg.get("flip_libero_images", True)
 
         if cfg.get("add_value_head", False):
             state_dim = cfg.get("state_dim", 9)
@@ -108,47 +112,48 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
                 bias_last=True,
             )
 
-    def _sanitize_invalid_normalizer_stats(self) -> None:
-        """Replace invalid normalizer stats to keep runtime stable.
+    def _validate_normalizer_stats(self) -> None:
+        """Validate normalizer stats and fail fast when artifacts are invalid."""
+        invalid_tensors: list[str] = []
 
-        Some exported model artifacts may contain inf/nan in normalization buffers,
-        which causes lerobot's Normalize.forward() assertions to abort execution.
-        """
-        fixed_count = 0
-
-        def _maybe_fix(name: str, tensor: torch.Tensor) -> int:
+        def _check(name: str, tensor: torch.Tensor) -> None:
             lname = name.lower()
             if (
                 "normalize" not in lname
                 and "normalizer" not in lname
                 and "unnormalize" not in lname
             ):
-                return 0
+                return
             if "mean" not in lname and "std" not in lname:
-                return 0
-            if not (torch.isinf(tensor).any() or torch.isnan(tensor).any()):
-                return 0
-
-            with torch.no_grad():
-                if "std" in lname:
-                    tensor.copy_(torch.ones_like(tensor))
-                else:
-                    tensor.copy_(torch.zeros_like(tensor))
-            return 1
+                return
+            if torch.isinf(tensor).any() or torch.isnan(tensor).any():
+                invalid_tensors.append(name)
 
         for name, param in self.policy.named_parameters():
-            fixed_count += _maybe_fix(name, param)
+            _check(name, param)
 
         for name, buffer in self.policy.named_buffers():
-            fixed_count += _maybe_fix(name, buffer)
+            _check(name, buffer)
 
-        if fixed_count > 0:
-            logging.warning(
-                "[SmolVLA] Found invalid normalization stats in %d tensors under %s; "
-                "replaced with safe defaults (mean=0, std=1).",
-                fixed_count,
-                self.model_path,
+        if invalid_tensors:
+            names = ", ".join(invalid_tensors)
+            raise ValueError(
+                f"[SmolVLA] Invalid normalization stats (nan/inf) in model '{self.model_path}': {names}"
             )
+
+    def _build_policy_processors(self, cfg: DictConfig):
+        """Build policy pre/postprocessors with the same factory path as lerobot eval."""
+        from lerobot.policies.factory import make_pre_post_processors
+
+        preprocessor_overrides = {
+            "device_processor": {"device": str(self.policy.config.device)},
+            "rename_observations_processor": {"rename_map": {}},
+        }
+        return make_pre_post_processors(
+            policy_cfg=self.policy.config,
+            pretrained_path=cfg.model_path,
+            preprocessor_overrides=preprocessor_overrides,
+        )
 
     def _resolve_image_keys(self, cfg: DictConfig) -> list[str]:
         """Determine which image keys to use, with auto-detection from the model config.
@@ -199,26 +204,26 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
             img = img / 255.0
         return img.permute(0, 3, 1, 2).contiguous()
 
-    def _make_lerobot_batch(
+    def _make_lerobot_raw_batch(
         self,
         env_obs: dict[str, Any],
-        actions: torch.Tensor | None = None,
-        noise: torch.Tensor | None = None,
-        timestep: torch.Tensor | None = None,
-        device: torch.device | None = None,
+        device: torch.device,
     ) -> dict[str, Any]:
-        """Build a lerobot-format batch from an RLinf env_obs dict."""
+        """Build a raw lerobot-format batch from an RLinf env_obs dict."""
         batch: dict[str, Any] = {}
 
         main_img = self._hwc_to_chw_float(env_obs[self.main_image_env_key])
+        if self.flip_libero_images:
+            main_img = torch.flip(main_img, dims=[2, 3])
         batch[f"observation.images.{self.image_keys[0]}"] = main_img
 
         if self.wrist_image_env_key and len(self.image_keys) > 1:
             wrist = env_obs.get(self.wrist_image_env_key)
             if wrist is not None:
-                batch[f"observation.images.{self.image_keys[1]}"] = (
-                    self._hwc_to_chw_float(wrist)
-                )
+                wrist_img = self._hwc_to_chw_float(wrist)
+                if self.flip_libero_images:
+                    wrist_img = torch.flip(wrist_img, dims=[2, 3])
+                batch[f"observation.images.{self.image_keys[1]}"] = wrist_img
 
         states = env_obs["states"]
         if isinstance(states, np.ndarray):
@@ -228,19 +233,14 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
 
         batch["task"] = list(env_obs["task_descriptions"])
 
-        if actions is not None:
-            batch["action"] = actions.float()
-        if noise is not None:
-            batch["noise"] = noise.float()
-        if timestep is not None:
-            batch["time"] = timestep.float()
+        return {
+            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            for k, v in batch.items()
+        }
 
-        if device is not None:
-            batch = {
-                k: v.to(device) if isinstance(v, torch.Tensor) else v
-                for k, v in batch.items()
-            }
-        return batch
+    def _preprocess_obs_batch(self, env_obs: dict[str, Any], device: torch.device) -> dict[str, Any]:
+        raw_batch = self._make_lerobot_raw_batch(env_obs, device=device)
+        return self.policy_preprocessor(raw_batch)
 
     # ------------------------------------------------------------------
     # Flow-matching log-prob
@@ -252,7 +252,6 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         norm_actions: torch.Tensor,
         noise: torch.Tensor,
         timestep: torch.Tensor,
-        device: torch.device,
     ) -> torch.Tensor:
         """Compute PPO log_prob proxy via flow-matching MSE.
 
@@ -266,7 +265,7 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         # (action, noise, time) can hit token-mask shape mismatches during
         # no-ray training. Use a deterministic surrogate logprob to keep the
         # rollout/update loop runnable.
-        del batch_obs, timestep, device
+        del batch_obs, timestep
         surrogate = -((norm_actions - noise).float() ** 2).sum(dim=-1)
         return surrogate.float()
 
@@ -305,33 +304,245 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         """
         device = next(self.policy.parameters()).device
 
-        batch_obs = self._make_lerobot_batch(env_obs, device=device)
+        # ####### TEMP START #######
+        external_policy_payload = kwargs.get("external_policy_payload", None)
+        if external_policy_payload is not None:
+            if not isinstance(external_policy_payload, dict):
+                raise TypeError(
+                    f"external_policy_payload must be dict, got {type(external_policy_payload)}"
+                )
+            batch_obs = {
+                key: (
+                    value.to(device)
+                    if isinstance(value, torch.Tensor)
+                    else value
+                )
+                for key, value in external_policy_payload.items()
+            }
+        else:
+            batch_obs = self._preprocess_obs_batch(env_obs, device=device)
+        # ####### TEMP END #######
 
-        # Clear queue so generation uses the current observation.
+        # Clear queue so generation starts from the current observation.
         if hasattr(self.policy, "reset"):
             self.policy.reset()
 
-        # Use one forward pass per rollout step and tile the first action to a
-        # fixed-size chunk. This keeps the no-ray path stable across lerobot
-        # versions where cached chunk APIs may change behavior.
-        first_act = self.policy.select_action(batch_obs)  # [B, action_dim]
-        act = first_act.unsqueeze(1).repeat(1, self.num_action_chunks, 1)
-        B, chunk, _ = act.shape
+        # ####### TEMP START #######
+        external_policy_noise = kwargs.get("external_policy_noise", None)
+        policy_noise_tensor = None
+        if external_policy_noise is not None:
+            if isinstance(external_policy_noise, np.ndarray):
+                policy_noise_tensor = torch.from_numpy(external_policy_noise)
+            elif isinstance(external_policy_noise, torch.Tensor):
+                policy_noise_tensor = external_policy_noise
+            else:
+                raise TypeError(
+                    f"external_policy_noise must be np.ndarray or torch.Tensor, got {type(external_policy_noise)}"
+                )
+            policy_noise_tensor = policy_noise_tensor.to(device=device, dtype=torch.float32)
+            if policy_noise_tensor.ndim not in (3, 4):
+                raise ValueError(
+                    "external_policy_noise must have shape [B, chunk_size, max_action_dim] "
+                    "or [B, num_action_chunks, chunk_size, max_action_dim]"
+                )
+            if policy_noise_tensor.shape[0] != batch_obs["observation.state"].shape[0]:
+                raise ValueError(
+                    "external_policy_noise batch size does not match env_obs batch size"
+                )
+            if policy_noise_tensor.ndim == 4 and policy_noise_tensor.shape[1] != self.num_action_chunks:
+                raise ValueError(
+                    "external_policy_noise second dim must equal num_action_chunks when ndim=4"
+                )
+        # ####### TEMP END #######
+
+        norm_action_list = []
+        raw_action_list = []
+
+        def _tensor_fingerprint(tensor: torch.Tensor | None) -> dict[str, Any] | None:
+            if tensor is None:
+                return None
+            t_cpu = tensor.detach().cpu().contiguous()
+            t_float = t_cpu.float()
+            t_hash = t_float if t_cpu.dtype == torch.bfloat16 else t_cpu
+            return {
+                "shape": list(t_cpu.shape),
+                "dtype": str(t_cpu.dtype),
+                "sha256": hashlib.sha256(t_hash.numpy().tobytes()).hexdigest(),
+                "min": float(t_float.min().item()) if t_float.numel() else 0.0,
+                "max": float(t_float.max().item()) if t_float.numel() else 0.0,
+                "mean": float(t_float.mean().item()) if t_float.numel() else 0.0,
+            }
+
+        def _batch_fingerprint(batch: dict[str, Any]) -> dict[str, Any]:
+            out: dict[str, Any] = {}
+            for key, value in batch.items():
+                if isinstance(value, torch.Tensor):
+                    out[key] = _tensor_fingerprint(value)
+                elif isinstance(value, list):
+                    out[key] = {"type": "list", "len": len(value)}
+                else:
+                    out[key] = {"type": type(value).__name__}
+            return out
+
+        def _model_fingerprint(model: nn.Module) -> dict[str, Any]:
+            hasher = hashlib.sha256()
+            for _, param in model.named_parameters():
+                p_cpu = param.detach().cpu().contiguous()
+                p_hash = p_cpu.float() if p_cpu.dtype == torch.bfloat16 else p_cpu
+                hasher.update(p_hash.numpy().tobytes())
+            first_param = next(model.parameters())
+            return {
+                "class": model.__class__.__name__,
+                "module": model.__class__.__module__,
+                "model_sha256": hasher.hexdigest(),
+                "param_dtype": str(first_param.dtype),
+                "param_device": str(first_param.device),
+            }
+
+        def _backend_snapshot() -> dict[str, Any]:
+            return {
+                "cudnn_benchmark": torch.backends.cudnn.benchmark,
+                "cudnn_deterministic": torch.backends.cudnn.deterministic,
+                "cuda_matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+                "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+            }
+
+        select_action_align_dump_path = os.environ.get("RLINF_SELECT_ACTION_ALIGN_DUMP_PATH", "").strip()
+        align_batch_obs: dict[str, Any] | None = None
+        align_step_noise: torch.Tensor | None = None
+        align_norm_actions: torch.Tensor | None = None
+        align_compared = False
+        if select_action_align_dump_path:
+            self.policy.eval()
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
+
+            align_dump = torch.load(select_action_align_dump_path, map_location="cpu")
+            loaded_batch_obs = align_dump.get("batch_obs", None)
+            loaded_step_noise = align_dump.get("step_noise", None)
+            loaded_norm_actions = align_dump.get("norm_actions", None)
+            loaded_runtime = align_dump.get("runtime", {})
+            loaded_batch_fp = align_dump.get("batch_obs_fingerprint", None)
+            loaded_step_noise_fp = align_dump.get("step_noise_fingerprint", None)
+
+            if isinstance(loaded_batch_obs, dict):
+                align_batch_obs = {
+                    key: value.to(device) if isinstance(value, torch.Tensor) else value
+                    for key, value in loaded_batch_obs.items()
+                }
+            if isinstance(loaded_step_noise, torch.Tensor):
+                align_step_noise = loaded_step_noise.to(device=device, dtype=torch.float32)
+            if isinstance(loaded_norm_actions, torch.Tensor):
+                align_norm_actions = loaded_norm_actions.to(device=device, dtype=torch.float32)
+
+            logging.warning(
+                "[TEMP] Loaded select_action align payload from %s",
+                select_action_align_dump_path,
+            )
+            logging.warning("[TEMP] no-ray backend snapshot: %s", _backend_snapshot())
+            logging.warning("[TEMP] lerobot backend snapshot: %s", loaded_runtime.get("backend", {}))
+
+            local_model_fp = _model_fingerprint(self.policy)
+            logging.warning("[TEMP] no-ray model fingerprint: %s", local_model_fp)
+            logging.warning("[TEMP] lerobot model fingerprint: %s", loaded_runtime.get("model", {}))
+
+            loaded_model_sha = loaded_runtime.get("model", {}).get("model_sha256", None)
+            local_model_sha = local_model_fp.get("model_sha256", None)
+            if loaded_model_sha is not None and loaded_model_sha != local_model_sha:
+                logging.warning(
+                    "[TEMP] model_sha256 mismatch: lerobot=%s no-ray=%s",
+                    loaded_model_sha,
+                    local_model_sha,
+                )
+
+            if align_batch_obs is not None and isinstance(loaded_batch_fp, dict):
+                local_batch_fp = _batch_fingerprint(align_batch_obs)
+                mismatch_keys = [
+                    key for key in sorted(set(loaded_batch_fp) | set(local_batch_fp))
+                    if loaded_batch_fp.get(key) != local_batch_fp.get(key)
+                ]
+                logging.warning("[TEMP] batch_obs fingerprint mismatch keys: %s", mismatch_keys)
+
+            if align_step_noise is not None and loaded_step_noise_fp is not None:
+                local_step_noise_fp = _tensor_fingerprint(align_step_noise)
+                if local_step_noise_fp != loaded_step_noise_fp:
+                    logging.warning(
+                        "[TEMP] step_noise fingerprint mismatch: lerobot=%s no-ray=%s",
+                        loaded_step_noise_fp,
+                        local_step_noise_fp,
+                    )
+
+        for action_step_idx in range(self.num_action_chunks):
+            # ####### TEMP START #######
+            step_noise = None
+            if policy_noise_tensor is not None:
+                if policy_noise_tensor.ndim == 4:
+                    step_noise = policy_noise_tensor[:, action_step_idx, :, :]
+                else:
+                    step_noise = policy_noise_tensor
+            # ####### TEMP END #######
+            batch_obs_for_select = align_batch_obs if align_batch_obs is not None else batch_obs
+            step_noise_for_select = align_step_noise if align_step_noise is not None else step_noise
+
+            # action_norm_step = self.policy.select_action(batch_obs_for_select, noise=step_noise_for_select)
+            action_norm_step = self.policy._get_action_chunk(batch_obs_for_select, noise=step_noise_for_select)
+
+            if align_norm_actions is not None and not align_compared:
+                expected_norm = align_norm_actions
+                current_norm = action_norm_step
+                if expected_norm.shape != current_norm.shape:
+                    logging.warning(
+                        "[TEMP] select_action norm_actions shape mismatch: expected=%s current=%s",
+                        tuple(expected_norm.shape),
+                        tuple(current_norm.shape),
+                    )
+                else:
+                    diff = (current_norm.float() - expected_norm.float()).abs()
+                    logging.warning(
+                        "[TEMP] select_action norm_actions diff: max_abs=%.8f mean_abs=%.8f",
+                        diff.max().item(),
+                        diff.mean().item(),
+                    )
+                    logging.warning(
+                        "[TEMP] no-ray norm_actions fingerprint: %s",
+                        _tensor_fingerprint(current_norm),
+                    )
+                    logging.warning(
+                        "[TEMP] lerobot norm_actions fingerprint: %s",
+                        _tensor_fingerprint(expected_norm),
+                    )
+                align_compared = True
+                
+                raise SystemExit(0)
+
+            action_raw_step = self.policy_postprocessor(action_norm_step)
+            norm_action_list.append(action_norm_step)
+            raw_action_list.append(action_raw_step)
+
+        act = torch.stack(norm_action_list, dim=1)
+        raw_act = torch.stack(raw_action_list, dim=1)
+        B, _, _ = act.shape
 
         # Sample deterministic (noise, timestep) for PPO consistency.
         noise = torch.randn_like(act)  # [B, chunk, action_dim]
         timestep = torch.rand(B, device=device)  # [B]
 
-        prev_logprobs = self._compute_flow_logprob(
-            batch_obs, act, noise, timestep, device
-        )  # [B]
+        # ####### TEMP START #######
+        temp_rollout_only = os.environ.get("RLINF_TEMP_EXIT_AFTER_FIRST_ROLLOUT", "0") == "1"
+        if temp_rollout_only:
+            prev_logprobs = torch.zeros(B, device=device, dtype=torch.float32)
+        else:
+            prev_logprobs = self._compute_flow_logprob(batch_obs, act, noise, timestep)  # [B]
+        # ####### TEMP END #######
 
         states = env_obs["states"]
         if isinstance(states, np.ndarray):
             states = torch.from_numpy(states)
         prev_values = self._compute_value(states, device)  # [B]
 
-        raw_actions = act.detach().cpu().numpy()  # [B, chunk, action_dim]
+        raw_actions = raw_act.detach().cpu().numpy()  # [B, chunk, action_dim]
 
         result: dict[str, Any] = {
             "prev_logprobs": prev_logprobs,
@@ -360,6 +571,15 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
             ),
             "task_descriptions": list(env_obs["task_descriptions"]),
         }
+
+        # ####### TEMP START #######
+        if os.environ.get("RLINF_ROLLOUT_COMPARE_DUMP_PATH", "").strip():
+            result["debug_policy_payload"] = {
+                k: (v.detach().cpu() if isinstance(v, torch.Tensor) else v)
+                for k, v in batch_obs.items()
+            }
+            result["debug_action_post"] = raw_act.detach().cpu()
+        # ####### TEMP END #######
 
         return raw_actions, result
 
@@ -394,15 +614,13 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         if forward_inputs.get("wrist_images") is not None and self.wrist_image_env_key:
             stored_env_obs[self.wrist_image_env_key] = forward_inputs["wrist_images"]
 
-        batch_obs = self._make_lerobot_batch(stored_env_obs, device=device)
+        batch_obs = self._preprocess_obs_batch(stored_env_obs, device=device)
 
         noise = forward_inputs["noise"].to(device)
         timestep = forward_inputs["timestep"].to(device)
         norm_actions = forward_inputs["norm_actions"].to(device)
 
-        logprobs = self._compute_flow_logprob(
-            batch_obs, norm_actions, noise, timestep, device
-        )  # [B]
+        logprobs = self._compute_flow_logprob(batch_obs, norm_actions, noise, timestep)  # [B]
 
         values = self._compute_value(forward_inputs["states"], device)  # [B]
 

@@ -47,8 +47,10 @@ You can learn about the CLI options for this script in the `EvalPipelineConfig` 
 """
 
 import concurrent.futures as cf
+import hashlib
 import json
 import logging
+import os
 import threading
 import time
 from collections import defaultdict
@@ -137,6 +139,17 @@ def rollout(
     """
     assert isinstance(policy, nn.Module), "Policy must be a PyTorch nn module."
 
+    def _cast_floating_tensors(obj: Any, dtype: torch.dtype) -> Any:
+        if isinstance(obj, torch.Tensor):
+            return obj.to(dtype=dtype) if obj.is_floating_point() else obj
+        if isinstance(obj, dict):
+            return {k: _cast_floating_tensors(v, dtype) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_cast_floating_tensors(v, dtype) for v in obj]
+        if isinstance(obj, tuple):
+            return tuple(_cast_floating_tensors(v, dtype) for v in obj)
+        return obj
+
     # Reset the policy and environments.
     policy.reset()
     observation, info = env.reset(seed=seeds)
@@ -160,7 +173,76 @@ def rollout(
         leave=False,
     )
     check_env_attributes_and_types(env)
+
+    # ####### TEMP START #######
+    temp_dump_path = os.environ.get("LEROBOT_EVAL_DUMP_PATH", "").strip()
+
+    def _to_cpu_debug(obj: Any):
+        if isinstance(obj, torch.Tensor):
+            return obj.detach().cpu()
+        if isinstance(obj, dict):
+            return {k: _to_cpu_debug(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_to_cpu_debug(v) for v in obj]
+        if isinstance(obj, tuple):
+            return tuple(_to_cpu_debug(v) for v in obj)
+        return obj
+
+    def _tensor_fingerprint(tensor: torch.Tensor | None) -> dict[str, Any] | None:
+        if tensor is None:
+            return None
+        t_cpu = tensor.detach().cpu().contiguous()
+        t_float = t_cpu.float()
+        t_hash = t_float if t_cpu.dtype == torch.bfloat16 else t_cpu
+        return {
+            "shape": list(t_cpu.shape),
+            "dtype": str(t_cpu.dtype),
+            "sha256": hashlib.sha256(t_hash.numpy().tobytes()).hexdigest(),
+            "min": float(t_float.min().item()) if t_float.numel() else 0.0,
+            "max": float(t_float.max().item()) if t_float.numel() else 0.0,
+            "mean": float(t_float.mean().item()) if t_float.numel() else 0.0,
+        }
+
+    def _batch_fingerprint(batch: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in batch.items():
+            if isinstance(value, torch.Tensor):
+                out[key] = _tensor_fingerprint(value)
+            elif isinstance(value, list):
+                out[key] = {"type": "list", "len": len(value)}
+            else:
+                out[key] = {"type": type(value).__name__}
+        return out
+
+    def _model_fingerprint(model: nn.Module) -> dict[str, Any]:
+        hasher = hashlib.sha256()
+        for _, param in model.named_parameters():
+            p_cpu = param.detach().cpu().contiguous()
+            p_hash = p_cpu.float() if p_cpu.dtype == torch.bfloat16 else p_cpu
+            hasher.update(p_hash.numpy().tobytes())
+        first_param = next(model.parameters())
+        return {
+            "class": model.__class__.__name__,
+            "module": model.__class__.__module__,
+            "model_sha256": hasher.hexdigest(),
+            "param_dtype": str(first_param.dtype),
+            "param_device": str(first_param.device),
+        }
+
+    def _backend_snapshot() -> dict[str, Any]:
+        return {
+            "cudnn_benchmark": torch.backends.cudnn.benchmark,
+            "cudnn_deterministic": torch.backends.cudnn.deterministic,
+            "cuda_matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+            "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+        }
+    # ####### TEMP END #######
+
     while not np.all(done) and step < max_steps:
+        # ####### TEMP START #######
+        observation_raw = deepcopy(observation)
+        # ####### TEMP END #######
+
         # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
         observation = preprocess_observation(observation)
         if return_observations:
@@ -174,16 +256,117 @@ def rollout(
         observation = env_preprocessor(observation)
 
         observation = preprocessor(observation)
+        policy_dtype = next(policy.parameters()).dtype
+        observation = _cast_floating_tensors(observation, policy_dtype)
+        # ####### TEMP START #######
+        temp_policy_noise = None
+        if temp_dump_path:
+            num_actions = getattr(policy, "num_actions", None)
+            if num_actions is None and hasattr(policy, "config"):
+                num_actions = getattr(policy.config, "chunk_size", None)
+            if num_actions is None:
+                raise AttributeError(
+                    "Policy missing num_actions/chunk_size; cannot build deterministic TEMP noise"
+                )
+
+            max_action_dim = getattr(policy, "max_action_dim", None)
+            if max_action_dim is None and hasattr(policy, "config"):
+                max_action_dim = getattr(policy.config, "max_action_dim", None)
+            if max_action_dim is None:
+                raise AttributeError(
+                    "Policy missing max_action_dim; cannot build deterministic TEMP noise"
+                )
+            batch_size = int(env.num_envs)
+            policy_device = next(policy.parameters()).device
+            temp_policy_noise = torch.randn(
+                batch_size,
+                int(num_actions),
+                int(max_action_dim),
+                device=policy_device,
+                dtype=torch.float32,
+            )
+        # ####### TEMP END #######
+
         with torch.inference_mode():
-            action = policy.select_action(observation)
+            if select_action_align_dump_path := os.environ.get("RLINF_SELECT_ACTION_ALIGN_DUMP_PATH", "").strip():
+                policy.eval()
+                torch.backends.cudnn.benchmark = False
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cuda.matmul.allow_tf32 = False
+                torch.backends.cudnn.allow_tf32 = False
+                action = policy._get_action_chunk(observation, noise=temp_policy_noise)
+            else:
+                action = policy.select_action(observation, noise=temp_policy_noise)
+
+        select_action_align_dump_path = os.environ.get("RLINF_SELECT_ACTION_ALIGN_DUMP_PATH", "").strip()
+        if select_action_align_dump_path:
+            align_payload = {
+                "meta": {
+                    "source": "lerobot_eval.select_action",
+                    "step": step,
+                },
+                "runtime": {
+                    "backend": _backend_snapshot(),
+                    "model": _model_fingerprint(policy),
+                },
+                "batch_obs": _to_cpu_debug(observation),
+                "step_noise": _to_cpu_debug(temp_policy_noise),
+                "norm_actions": _to_cpu_debug(action),
+                "batch_obs_fingerprint": _batch_fingerprint(observation),
+                "step_noise_fingerprint": _tensor_fingerprint(temp_policy_noise),
+                "norm_actions_fingerprint": _tensor_fingerprint(action),
+            }
+            align_dump_file = Path(select_action_align_dump_path)
+            align_dump_file.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(align_payload, align_dump_file)
+            logging.warning("[TEMP] select_action align dump written: %s", align_dump_file)
+            raise SystemExit(0)
+        
+        action_model_raw = action
         action = postprocessor(action)
+        action_after_postprocessor = action
 
         action_transition = {ACTION: action}
         action_transition = env_postprocessor(action_transition)
         action = action_transition[ACTION]
+        action_numpy: np.ndarray = action.to("cpu").numpy()
+
+        # ####### TEMP START #######
+        if temp_dump_path:
+            step_prefix = f"step_{step}_"
+            dump_payload = {
+                "meta": {
+                    "source": "lerobot_eval",
+                    "step": step,
+                    "max_steps": max_steps,
+                    "num_envs": env.num_envs,
+                },
+                f"{step_prefix}env_obs": _to_cpu_debug(observation_raw),
+                f"{step_prefix}policy_payload": _to_cpu_debug(observation),
+                f"{step_prefix}model_raw_action": _to_cpu_debug(action_model_raw),
+                f"{step_prefix}postprocessor_action": _to_cpu_debug(action_after_postprocessor),
+                f"{step_prefix}env_action": _to_cpu_debug(action),
+                f"{step_prefix}action_numpy": _to_cpu_debug(action_numpy),
+                f"{step_prefix}policy_noise": _to_cpu_debug(temp_policy_noise),
+                "obs_raw": _to_cpu_debug(observation_raw),
+                "policy_debug": {
+                    "policy_payload": _to_cpu_debug(observation),
+                    "policy_action_model_raw": _to_cpu_debug(action_model_raw),
+                    "policy_action_after_postprocessor": _to_cpu_debug(action_after_postprocessor),
+                    "policy_action_post": _to_cpu_debug(action),
+                    "policy_noise": _to_cpu_debug(temp_policy_noise),
+                },
+                "robot_action_to_send": _to_cpu_debug(action),
+                "action_numpy": _to_cpu_debug(action_numpy),
+            }
+            dump_file = Path(temp_dump_path)
+            dump_file.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(dump_payload, dump_file)
+            logging.warning("[TEMP] lerobot-eval dump written: %s", dump_file)
+            raise SystemExit(0)
+        # ####### TEMP END #######
 
         # Convert to CPU / numpy.
-        action_numpy: np.ndarray = action.to("cpu").numpy()
         assert action_numpy.ndim == 2, "Action dimensions should be (batch, action_dim)"
 
         # Apply the next action.
@@ -532,6 +715,33 @@ def eval_main(cfg: EvalPipelineConfig):
         rename_map=cfg.rename_map,
     )
 
+    requested_precision = (cfg.inference_precision or "auto").lower()
+    if requested_precision not in {"auto", "fp32", "bf16"}:
+        raise ValueError(
+            f"Unsupported inference_precision='{cfg.inference_precision}'. "
+            "Expected one of: auto, fp32, bf16"
+        )
+
+    if requested_precision == "fp32":
+        policy = policy.to(dtype=torch.float32)
+    elif requested_precision == "bf16":
+        if device.type != "cuda":
+            raise RuntimeError("bf16 inference_precision requires CUDA device")
+        capability = torch.cuda.get_device_capability(device)
+        if capability[0] < 8:
+            logging.warning(
+                "Running bf16 on GPU capability sm_%s%s; kernels may fall back and performance may degrade.",
+                capability[0],
+                capability[1],
+            )
+        policy = policy.to(dtype=torch.bfloat16)
+
+    logging.info(
+        "Inference precision mode: %s, first_param_dtype=%s",
+        requested_precision,
+        str(next(policy.parameters()).dtype),
+    )
+
     policy.eval()
 
     # The inference device is automatically set to match the detected hardware, overriding any previous device settings from training to ensure compatibility.
@@ -570,6 +780,17 @@ def eval_main(cfg: EvalPipelineConfig):
         for task_group, task_group_info in info.items():
             print(f"\nAggregated Metrics for {task_group}:")
             print(task_group_info)
+
+        # Print per-task success detail in requested format.
+        if "per_task" in info:
+            print("\nPer-task success details:")
+            per_task_sorted = sorted(info["per_task"], key=lambda item: (item["task_group"], item["task_id"]))
+            for item in per_task_sorted:
+                task_id = item["task_id"]
+                instruction = item.get("instruction", "")
+                successes = item["metrics"].get("successes", [])
+                success_flags = ["T" if bool(v) else "F" for v in successes]
+                print(f'task_{task_id}, instruction="{instruction}", success={success_flags}')
     # Close all vec envs
     close_envs(envs)
 
@@ -675,7 +896,15 @@ def run_one(
     # ensure we always provide video_paths key to simplify accumulation
     if max_episodes_rendered > 0:
         metrics.setdefault("video_paths", [])
-    return task_group, task_id, metrics
+    instruction = ""
+    try:
+        task_result = env.call("task_description")
+        if isinstance(task_result, list) and task_result and all(isinstance(v, str) for v in task_result):
+            instruction = task_result[0]
+    except Exception:
+        instruction = ""
+
+    return task_group, task_id, metrics, instruction
 
 
 def eval_policy_all(
@@ -753,9 +982,16 @@ def eval_policy_all(
         # sequential path (single accumulator path on the main thread)
         # NOTE: keeping a single-threaded accumulator avoids concurrent list appends or locks
         for task_group, task_id, env in tasks:
-            tg, tid, metrics = task_runner(task_group, task_id, env)
+            tg, tid, metrics, instruction = task_runner(task_group, task_id, env)
             _accumulate_to(tg, metrics)
-            per_task_infos.append({"task_group": tg, "task_id": tid, "metrics": metrics})
+            per_task_infos.append(
+                {
+                    "task_group": tg,
+                    "task_id": tid,
+                    "instruction": instruction,
+                    "metrics": metrics,
+                }
+            )
     else:
         # threaded path: submit all tasks, consume completions on main thread and accumulate there
         with cf.ThreadPoolExecutor(max_workers=max_parallel_tasks) as executor:
@@ -764,9 +1000,16 @@ def eval_policy_all(
                 fut = executor.submit(task_runner, task_group, task_id, env)
                 fut2meta[fut] = (task_group, task_id)
             for fut in cf.as_completed(fut2meta):
-                tg, tid, metrics = fut.result()
+                tg, tid, metrics, instruction = fut.result()
                 _accumulate_to(tg, metrics)
-                per_task_infos.append({"task_group": tg, "task_id": tid, "metrics": metrics})
+                per_task_infos.append(
+                    {
+                        "task_group": tg,
+                        "task_id": tid,
+                        "instruction": instruction,
+                        "metrics": metrics,
+                    }
+                )
 
     # compute aggregated metrics helper (robust to lists/scalars)
     def _agg_from_list(xs):

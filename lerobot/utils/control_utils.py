@@ -18,6 +18,7 @@
 
 
 import logging
+import os
 import traceback
 from contextlib import nullcontext
 from copy import copy
@@ -74,6 +75,7 @@ def predict_action(
     use_amp: bool,
     task: str | None = None,
     robot_type: str | None = None,
+    return_debug_payload: bool = False,
 ):
     """
     Performs a single-step inference to predict a robot action from an observation.
@@ -99,20 +101,51 @@ def predict_action(
         A `torch.Tensor` containing the predicted action, ready for the robot.
     """
     observation = copy(observation)
+    debug_payload = None
+
+    # ####### TEMP START #######
+    def _to_cpu_debug(obj):
+        if isinstance(obj, torch.Tensor):
+            return obj.detach().cpu()
+        if isinstance(obj, dict):
+            return {k: _to_cpu_debug(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_to_cpu_debug(v) for v in obj]
+        if isinstance(obj, tuple):
+            return tuple(_to_cpu_debug(v) for v in obj)
+        return obj
+    # ####### TEMP END #######
+
     with (
         torch.inference_mode(),
         torch.autocast(device_type=device.type) if device.type == "cuda" and use_amp else nullcontext(),
     ):
         # Convert to pytorch format: channel first and float32 in [0,1] with batch dimension
-        observation = prepare_observation_for_inference(observation, device, task, robot_type)
-        observation = preprocessor(observation)
+        observation_prepared = prepare_observation_for_inference(observation, device, task, robot_type)
+        observation = preprocessor(observation_prepared)
 
         # Compute the next action with the policy
         # based on the current observation
-        action = policy.select_action(observation)
+        action_policy = policy.select_action(observation)
 
-        action = postprocessor(action)
+        # ####### TEMP START #######
+        if return_debug_payload or os.environ.get("LEROBOT_RECORD_DUMP_PATH"):
+            debug_payload = {
+                "observation_prepared": _to_cpu_debug(observation_prepared),
+                "policy_payload": _to_cpu_debug(observation),
+                "policy_action_raw": _to_cpu_debug(action_policy),
+            }
+        # ####### TEMP END #######
 
+        action = postprocessor(action_policy)
+
+        # ####### TEMP START #######
+        if debug_payload is not None:
+            debug_payload["policy_action_post"] = _to_cpu_debug(action)
+        # ####### TEMP END #######
+
+    if return_debug_payload:
+        return action, debug_payload
     return action
 
 

@@ -13,6 +13,15 @@ export ROBOT_PLATFORM="LIBERO"
 export PYTHONPATH="${REPO_PATH}"
 export UV_PROJECT_ENVIRONMENT="${REPO_PATH}/.venv"
 export EMBODIED_PATH="${EMBODIED_PATH}"
+# ####### TEMP START #######
+export RLINF_TEMP_EXIT_AFTER_FIRST_ROLLOUT="1"
+export RLINF_TEMP_NUM_ROLLOUTS="3"
+export RLINF_TEMP_MAX_STEPS="520"
+export WANDB_DISABLED="true"
+TEMP_LOGGER_BACKENDS_OVERRIDE='runner.logger.logger_backends=[tensorboard]'
+TEMP_MAX_STEPS_OVERRIDE='env.train.max_steps_per_rollout_epoch=520'
+TEMP_EVAL_MAX_STEPS_OVERRIDE='env.eval.max_steps_per_rollout_epoch=520'
+# ####### TEMP END #######
 
 CONFIG_NAME="libero_10_ppo_smolvla"
 MODEL_PATH="${REPO_PATH}/models/smolvla_libero"
@@ -25,7 +34,7 @@ STATE_DIM=8
 # User should set TRAIN_ENVS to be divisible by NPROC_PER_NODE.
 TRAIN_ENVS=2
 # User should set EVAL_ENVS to be divisible by NPROC_PER_NODE.
-EVAL_ENVS=4
+EVAL_ENVS=2
 MICRO_BATCH=16
 GLOBAL_BATCH=128
 SAVE_EVAL_VIDEO=True
@@ -42,6 +51,9 @@ uv run --no-sync torchrun \
   --config-path "${REPO_PATH}/examples/embodiment/config/" \
   --config-name "${CONFIG_NAME}" \
   runner.logger.log_path="${LOG_DIR}" \
+  "${TEMP_LOGGER_BACKENDS_OVERRIDE}" \
+  "${TEMP_MAX_STEPS_OVERRIDE}" \
+  "${TEMP_EVAL_MAX_STEPS_OVERRIDE}" \
   wandb.run="${WANDB_RUN}" \
   actor.model.model_path="${MODEL_PATH}" \
   rollout.model.model_path="${MODEL_PATH}" \

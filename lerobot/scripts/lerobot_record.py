@@ -68,11 +68,14 @@ lerobot-record \
 """
 
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from pprint import pformat
 from typing import Any
+
+import torch
 
 from lerobot.cameras import (  # noqa: F401
     CameraConfig,  # noqa: F401
@@ -337,6 +340,24 @@ def record_loop(
     no_action_count = 0
     timestamp = 0
     start_episode_t = time.perf_counter()
+
+    # ####### TEMP START #######
+    temp_dump_path = os.environ.get("LEROBOT_RECORD_DUMP_PATH", "").strip()
+    temp_dump_written = False
+    temp_policy_debug_payload: dict[str, Any] | None = None
+
+    def _to_cpu_debug(obj: Any):
+        if isinstance(obj, torch.Tensor):
+            return obj.detach().cpu()
+        if isinstance(obj, dict):
+            return {k: _to_cpu_debug(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_to_cpu_debug(v) for v in obj]
+        if isinstance(obj, tuple):
+            return tuple(_to_cpu_debug(v) for v in obj)
+        return obj
+    # ####### TEMP END #######
+
     while timestamp < control_time_s:
         start_loop_t = time.perf_counter()
 
@@ -355,7 +376,9 @@ def record_loop(
 
         # Get action from either policy or teleop
         if policy is not None and preprocessor is not None and postprocessor is not None:
-            action_values = predict_action(
+            # ####### TEMP START #######
+            temp_need_dump = bool(temp_dump_path) and not temp_dump_written
+            predict_result = predict_action(
                 observation=observation_frame,
                 policy=policy,
                 device=get_safe_torch_device(policy.config.device),
@@ -364,7 +387,13 @@ def record_loop(
                 use_amp=policy.config.use_amp,
                 task=single_task,
                 robot_type=robot.robot_type,
+                return_debug_payload=temp_need_dump,
             )
+            if temp_need_dump:
+                action_values, temp_policy_debug_payload = predict_result
+            else:
+                action_values = predict_result
+            # ####### TEMP END #######
 
             act_processed_policy: RobotAction = make_robot_action(action_values, dataset.features)
 
@@ -406,6 +435,31 @@ def record_loop(
         # so action actually sent is saved in the dataset. action = postprocessor.process(action)
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
         _sent_action = robot.send_action(robot_action_to_send)
+
+        # ####### TEMP START #######
+        if bool(temp_dump_path) and not temp_dump_written and temp_policy_debug_payload is not None:
+            dump_payload = {
+                "meta": {
+                    "source": "lerobot_record",
+                    "timestamp": timestamp,
+                    "single_task": single_task,
+                    "robot_type": robot.robot_type,
+                },
+                "obs_raw": _to_cpu_debug(obs),
+                "obs_processed": _to_cpu_debug(obs_processed),
+                "observation_frame": _to_cpu_debug(observation_frame),
+                "policy_debug": _to_cpu_debug(temp_policy_debug_payload),
+                "act_processed_policy": _to_cpu_debug(act_processed_policy),
+                "robot_action_to_send": _to_cpu_debug(robot_action_to_send),
+                "sent_action": _to_cpu_debug(_sent_action),
+            }
+            dump_file = Path(temp_dump_path)
+            dump_file.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(dump_payload, dump_file)
+            logging.warning("[TEMP] lerobot-record dump written: %s", dump_file)
+            temp_dump_written = True
+            temp_policy_debug_payload = None
+        # ####### TEMP END #######
 
         # Write to dataset
         if dataset is not None:

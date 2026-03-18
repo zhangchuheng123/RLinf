@@ -18,6 +18,6 @@ state_dim: 9           # proprioceptive state dimension fed to the value head
 # image_keys is auto-detected from policy.config.image_features at load time.
 # Only set this to override the detected value, e.g.:
 #   image_keys: ["top"]   →  observation.images.top
-# image_keys: []
+image_keys: ["image", "image2"]
 main_image_env_key: "main_images"
-# wrist_image_env_key: "wrist_images"  # uncomment to add the wrist camera
+wrist_image_env_key: "wrist_images"

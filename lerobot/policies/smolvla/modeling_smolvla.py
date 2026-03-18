@@ -724,7 +724,7 @@ class VLAFlowMatching(nn.Module):
         att_masks = []
 
         # Fuse timestep + action information using an MLP
-        action_emb = self.action_in_proj(noisy_actions)
+        action_emb = self.action_in_proj(noisy_actions.to(dtype=self.action_in_proj.weight.dtype))
         device = action_emb.device
         bsize = action_emb.shape[0]
         dtype = action_emb.dtype
@@ -794,7 +794,7 @@ class VLAFlowMatching(nn.Module):
         suffix_out = suffix_out[:, -self.config.chunk_size :]
         # Original openpi code, upcast attention output
         suffix_out = suffix_out.to(dtype=torch.float32)
-        v_t = self.action_out_proj(suffix_out)
+        v_t = self.action_out_proj(suffix_out.to(dtype=self.action_out_proj.weight.dtype))
         losses = F.mse_loss(u_t, v_t, reduction="none")
         return losses
 
@@ -901,5 +901,5 @@ class VLAFlowMatching(nn.Module):
         suffix_out = outputs_embeds[1]
         suffix_out = suffix_out[:, -self.config.chunk_size :]
         suffix_out = suffix_out.to(dtype=torch.float32)
-        v_t = self.action_out_proj(suffix_out)
+        v_t = self.action_out_proj(suffix_out.to(dtype=self.action_out_proj.weight.dtype))
         return v_t
