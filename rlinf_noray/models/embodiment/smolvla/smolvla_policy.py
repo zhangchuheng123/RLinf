@@ -279,7 +279,8 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         if isinstance(states, np.ndarray):
             states = torch.from_numpy(states)
         if hasattr(self, "value_head"):
-            return self.value_head(states.to(device).float()).squeeze(-1)
+            value_dtype = next(self.value_head.parameters()).dtype
+            return self.value_head(states.to(device=device, dtype=value_dtype)).squeeze(-1)
         return torch.zeros(states.shape[0], device=device)
 
     # ------------------------------------------------------------------
@@ -486,8 +487,8 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
             batch_obs_for_select = align_batch_obs if align_batch_obs is not None else batch_obs
             step_noise_for_select = align_step_noise if align_step_noise is not None else step_noise
 
-            # action_norm_step = self.policy.select_action(batch_obs_for_select, noise=step_noise_for_select)
-            action_norm_step = self.policy._get_action_chunk(batch_obs_for_select, noise=step_noise_for_select)
+            action_norm_step = self.policy.select_action(batch_obs_for_select, noise=step_noise_for_select)
+            # action_norm_step = self.policy._get_action_chunk(batch_obs_for_select, noise=step_noise_for_select)
 
             if align_norm_actions is not None and not align_compared:
                 expected_norm = align_norm_actions
