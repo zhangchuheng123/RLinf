@@ -263,6 +263,10 @@ class LiberoPPODDPNoRayRunner:
         self.save_eval_video = bool(eval_video_cfg.get("save_video", False))
         self.eval_video_base_dir = str(eval_video_cfg.get("video_base_dir", ""))
 
+        # Optional stage-level debug prints for collect rollout hang diagnosis.
+        self._collect_debug_verbose = os.environ.get("RLINF_COLLECT_DEBUG_VERBOSE", "0") == "1"
+        self._collect_debug_max_chunks = int(os.environ.get("RLINF_COLLECT_DEBUG_MAX_CHUNKS", "3"))
+
         # ####### TEMP START #######
         self._temp_alignment_sample_path = os.environ.get("RLINF_ROLLOUT_COMPARE_DUMP_PATH", "").strip()
         self._temp_alignment_sample = None
@@ -348,6 +352,10 @@ class LiberoPPODDPNoRayRunner:
         sums = sums.to(self.device, dtype=torch.float64)
         dist.all_reduce(sums, op=dist.ReduceOp.SUM)
         return sums
+
+    def _collect_debug_print(self, message: str) -> None:
+        if self._collect_debug_verbose and self.rank == 0:
+            print(f"[collect-debug] {message}", flush=True)
 
     # ####### TEMP START #######
     @staticmethod
@@ -688,13 +696,23 @@ class LiberoPPODDPNoRayRunner:
         save_video: bool = False,
         video_epoch: int = 0,
     ) -> tuple[list[RolloutSample], dict[str, float]]:
+        self._collect_debug_print(
+            (
+                f"rollout start: mode={mode}, collect_samples={collect_samples}, "
+                f"rollout_epoch={rollout_epoch}, chunk_steps={chunk_steps}, num_envs={env.num_envs}"
+            )
+        )
         profile_reset = (
             self._chunk_profiler.profile("env_reset")
             if self._chunk_profiler is not None
             else contextlib.nullcontext()
         )
+        t0_reset = time.perf_counter()
         with profile_reset:
             obs, _ = env.reset()
+        self._collect_debug_print(
+            f"env.reset done in {(time.perf_counter() - t0_reset):.3f}s"
+        )
 
         if self._chunk_profiler is not None:
             self._chunk_profiler.flush_chunk(
@@ -727,7 +745,17 @@ class LiberoPPODDPNoRayRunner:
         try:
             for rollout_idx in range(rollout_epoch):
                 for chunk_idx in range(chunk_steps):
+                    debug_chunk = (
+                        self._collect_debug_verbose
+                        and self.rank == 0
+                        and rollout_idx == 0
+                        and chunk_idx < self._collect_debug_max_chunks
+                    )
                     chunk_start = time.perf_counter()
+                    if debug_chunk:
+                        self._collect_debug_print(
+                            f"chunk[{rollout_idx},{chunk_idx}] start"
+                        )
                 # ####### TEMP START #######
                     predict_env_obs = obs
                     predict_kwargs: dict[str, Any] = {}
@@ -748,6 +776,11 @@ class LiberoPPODDPNoRayRunner:
                         if self._chunk_profiler is not None
                         else contextlib.nullcontext()
                     )
+                    if debug_chunk:
+                        self._collect_debug_print(
+                            f"chunk[{rollout_idx},{chunk_idx}] entering predict_action_batch"
+                        )
+                    t0_predict = time.perf_counter()
                     with profile_predict:
                         module_was_training = self.ddp_model.module.training
                         if mode == "eval":
@@ -763,12 +796,24 @@ class LiberoPPODDPNoRayRunner:
                         finally:
                             if mode == "eval" and module_was_training:
                                 self.ddp_model.module.train()
+                    if debug_chunk:
+                        self._collect_debug_print(
+                            (
+                                f"chunk[{rollout_idx},{chunk_idx}] predict_action_batch done "
+                                f"in {(time.perf_counter() - t0_predict):.3f}s"
+                            )
+                        )
 
                     profile_prepare = (
                         self._chunk_profiler.profile("prepare_actions")
                         if self._chunk_profiler is not None
                         else contextlib.nullcontext()
                     )
+                    if debug_chunk:
+                        self._collect_debug_print(
+                            f"chunk[{rollout_idx},{chunk_idx}] entering prepare_actions"
+                        )
+                    t0_prepare = time.perf_counter()
                     with profile_prepare:
                         chunk_actions = torch.as_tensor(raw_actions)
                         chunk_actions = prepare_actions(
@@ -783,6 +828,13 @@ class LiberoPPODDPNoRayRunner:
 
                         if isinstance(chunk_actions, np.ndarray):
                             chunk_actions = torch.from_numpy(chunk_actions)
+                    if debug_chunk:
+                        self._collect_debug_print(
+                            (
+                                f"chunk[{rollout_idx},{chunk_idx}] prepare_actions done "
+                                f"in {(time.perf_counter() - t0_prepare):.3f}s"
+                            )
+                        )
 
                 # ####### TEMP START #######
                 if (
@@ -810,15 +862,27 @@ class LiberoPPODDPNoRayRunner:
                     self._temp_alignment_compared = True
                 # ####### TEMP END #######
 
-                    profile_env = (
-                        self._chunk_profiler.profile("env_chunk_step")
-                        if self._chunk_profiler is not None
-                        else contextlib.nullcontext()
+                profile_env = (
+                    self._chunk_profiler.profile("env_chunk_step")
+                    if self._chunk_profiler is not None
+                    else contextlib.nullcontext()
+                )
+                if debug_chunk:
+                    self._collect_debug_print(
+                        f"chunk[{rollout_idx},{chunk_idx}] entering env.chunk_step"
                     )
-                    with profile_env:
-                        obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = \
-                            env.chunk_step(chunk_actions)
-                        obs = obs_list[-1]
+                t0_env = time.perf_counter()
+                with profile_env:
+                    obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = \
+                        env.chunk_step(chunk_actions)
+                    obs = obs_list[-1]
+                if debug_chunk:
+                    self._collect_debug_print(
+                        (
+                            f"chunk[{rollout_idx},{chunk_idx}] env.chunk_step done "
+                            f"in {(time.perf_counter() - t0_env):.3f}s"
+                        )
+                    )
 
                 if save_video:
                     for step_idx, step_obs in enumerate(obs_list):
@@ -836,65 +900,84 @@ class LiberoPPODDPNoRayRunner:
                             )
                             frames_by_env[env_idx].append(frame)
 
-                    profile_metrics = (
-                        self._chunk_profiler.profile("compute_metrics")
+                profile_metrics = (
+                    self._chunk_profiler.profile("compute_metrics")
+                    if self._chunk_profiler is not None
+                    else contextlib.nullcontext()
+                )
+                with profile_metrics:
+                    chunk_returns = chunk_rewards.sum(dim=1).float().cpu()
+                    dones = torch.logical_or(
+                        chunk_terminations[:, -1], chunk_truncations[:, -1]
+                    ).float().cpu()
+
+                    success = chunk_terminations[:, -1].float().cpu()
+                    if infos_list and isinstance(infos_list[-1], dict):
+                        episode_info = infos_list[-1].get("episode")
+                        if isinstance(episode_info, dict) and "success_at_end" in episode_info:
+                            success_at_end = episode_info["success_at_end"]
+                            if isinstance(success_at_end, torch.Tensor):
+                                success = success_at_end.float().cpu()
+
+                    sums[0] += float(chunk_returns.sum().item())
+                    sums[1] += float(chunk_rewards.sum().item())
+                    sums[2] += float(dones.sum().item())
+                    sums[3] += float(success.sum().item())
+                    sums[4] += float(chunk_returns.numel())
+                    sums[5] += float(chunk_rewards.numel())
+
+                if collect_samples:
+                    profile_collect = (
+                        self._chunk_profiler.profile("collect_samples_pack")
                         if self._chunk_profiler is not None
                         else contextlib.nullcontext()
                     )
-                    with profile_metrics:
-                        chunk_returns = chunk_rewards.sum(dim=1).float().cpu()
-                        dones = torch.logical_or(
-                            chunk_terminations[:, -1], chunk_truncations[:, -1]
-                        ).float().cpu()
-
-                        success = chunk_terminations[:, -1].float().cpu()
-                        if infos_list and isinstance(infos_list[-1], dict):
-                            episode_info = infos_list[-1].get("episode")
-                            if isinstance(episode_info, dict) and "success_at_end" in episode_info:
-                                success_at_end = episode_info["success_at_end"]
-                                if isinstance(success_at_end, torch.Tensor):
-                                    success = success_at_end.float().cpu()
-
-                        sums[0] += float(chunk_returns.sum().item())
-                        sums[1] += float(chunk_rewards.sum().item())
-                        sums[2] += float(dones.sum().item())
-                        sums[3] += float(success.sum().item())
-                        sums[4] += float(chunk_returns.numel())
-                        sums[5] += float(chunk_rewards.numel())
-
-                    if collect_samples:
-                        profile_collect = (
-                            self._chunk_profiler.profile("collect_samples_pack")
-                            if self._chunk_profiler is not None
-                            else contextlib.nullcontext()
+                    if debug_chunk:
+                        self._collect_debug_print(
+                            f"chunk[{rollout_idx},{chunk_idx}] entering collect_samples_pack"
                         )
-                        with profile_collect:
-                            old_logprobs = _reduce_to_batch(_to_cpu(rollout_result["prev_logprobs"]))
-                            prev_values = _reduce_to_batch(_to_cpu(rollout_result["prev_values"]))
-                            returns = chunk_returns * (1.0 - dones)
+                    t0_collect = time.perf_counter()
+                    with profile_collect:
+                        old_logprobs = _reduce_to_batch(_to_cpu(rollout_result["prev_logprobs"]))
+                        prev_values = _reduce_to_batch(_to_cpu(rollout_result["prev_values"]))
+                        returns = chunk_returns * (1.0 - dones)
 
-                            sample = RolloutSample(
-                                forward_inputs=self._pack_forward_inputs(rollout_result),
-                                old_logprobs=old_logprobs,
-                                prev_values=prev_values,
-                                returns=returns,
+                        sample = RolloutSample(
+                            forward_inputs=self._pack_forward_inputs(rollout_result),
+                            old_logprobs=old_logprobs,
+                            prev_values=prev_values,
+                            returns=returns,
+                        )
+                        samples.append(sample)
+                    if debug_chunk:
+                        self._collect_debug_print(
+                            (
+                                f"chunk[{rollout_idx},{chunk_idx}] collect_samples_pack done "
+                                f"in {(time.perf_counter() - t0_collect):.3f}s"
                             )
-                            samples.append(sample)
-
-                    progress_bar.update(1)
-
-                    if self._chunk_profiler is not None:
-                        self._chunk_profiler.flush_chunk(
-                            payload={
-                                "mode": mode,
-                                "collect_samples": collect_samples,
-                                "rollout_idx": rollout_idx,
-                                "chunk_idx": chunk_idx,
-                                "chunk_total_s": float(time.perf_counter() - chunk_start),
-                                "num_envs": int(env.num_envs),
-                                "num_action_chunks": int(chunk_actions.shape[1]),
-                            }
                         )
+
+                progress_bar.update(1)
+
+                if self._chunk_profiler is not None:
+                    self._chunk_profiler.flush_chunk(
+                        payload={
+                            "mode": mode,
+                            "collect_samples": collect_samples,
+                            "rollout_idx": rollout_idx,
+                            "chunk_idx": chunk_idx,
+                            "chunk_total_s": float(time.perf_counter() - chunk_start),
+                            "num_envs": int(env.num_envs),
+                            "num_action_chunks": int(chunk_actions.shape[1]),
+                        }
+                    )
+                if debug_chunk:
+                    self._collect_debug_print(
+                        (
+                            f"chunk[{rollout_idx},{chunk_idx}] total "
+                            f"{(time.perf_counter() - chunk_start):.3f}s"
+                        )
+                    )
         finally:
             progress_bar.close()
 

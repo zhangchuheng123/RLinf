@@ -27,25 +27,25 @@ export WANDB_DISABLED="true"
 # TEMP_EVAL_MAX_STEPS_OVERRIDE='env.eval.max_steps_per_rollout_epoch=520'
 # ####### TEMP END #######
 
-TEMP_LOGGER_BACKENDS_OVERRIDE='runner.logger.logger_backends=[tensorboard]'
-TEMP_MAX_STEPS_OVERRIDE=''
-TEMP_EVAL_MAX_STEPS_OVERRIDE=''
+TEMP_LOGGER_BACKENDS_OVERRIDE="${TEMP_LOGGER_BACKENDS_OVERRIDE:-runner.logger.logger_backends=[tensorboard]}"
+TEMP_MAX_STEPS_OVERRIDE="${TEMP_MAX_STEPS_OVERRIDE:-}"
+TEMP_EVAL_MAX_STEPS_OVERRIDE="${TEMP_EVAL_MAX_STEPS_OVERRIDE:-}"
 
 CONFIG_NAME="libero_10_ppo_smolvla"
 MODEL_PATH="${REPO_PATH}/models/smolvla_libero"
 
 GPU_COUNT="$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)"
 
-NPROC_PER_NODE="${GPU_COUNT}"
-MODEL_PRECISION="bf16"
-STATE_DIM=8
+NPROC_PER_NODE="${NPROC_PER_NODE:-${GPU_COUNT}}"
+MODEL_PRECISION="${MODEL_PRECISION:-bf16}"
+STATE_DIM="${STATE_DIM:-8}"
 # User should set TRAIN_ENVS to be divisible by NPROC_PER_NODE.
-TRAIN_ENVS=2
+TRAIN_ENVS="${TRAIN_ENVS:-2}"
 # User should set EVAL_ENVS to be divisible by NPROC_PER_NODE.
-EVAL_ENVS=2
-MICRO_BATCH=16
-GLOBAL_BATCH=128
-SAVE_EVAL_VIDEO=True
+EVAL_ENVS="${EVAL_ENVS:-2}"
+MICRO_BATCH="${MICRO_BATCH:-16}"
+GLOBAL_BATCH="${GLOBAL_BATCH:-128}"
+SAVE_EVAL_VIDEO="${SAVE_EVAL_VIDEO:-False}"
 
 LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}_noray"
 MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"
