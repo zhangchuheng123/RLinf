@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pickle
+from pathlib import Path    
+
 import copy
 import os
 from typing import Optional, Union
@@ -345,9 +348,7 @@ class LiberoEnv(gym.Env):
             zero_actions = np.zeros((len(env_idx), 7))
             if self.cfg.reset_gripper_open:
                 zero_actions[:, -1] = -1
-            raw_obs, _reward, terminations, info_lists = self.env.step(
-                zero_actions, env_idx
-            )
+            raw_obs, _, _, _ = self.env.step(zero_actions, env_idx)
         if self.current_raw_obs is None:
             self.current_raw_obs = [None] * self.num_envs
         for i, idx in enumerate(env_idx):

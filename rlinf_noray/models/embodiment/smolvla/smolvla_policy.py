@@ -325,6 +325,7 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
             raw_actions : np.ndarray [B, num_action_chunks, action_dim].
             result      : dict with PPO bookkeeping tensors.
         """
+
         device = next(self.policy.parameters()).device
 
         batch_obs = self._preprocess_obs_batch(env_obs, device=device)
@@ -347,32 +348,37 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         self.policy.reset()
 
         B = batch_obs["observation.state"].shape[0]
+        policy_dtype = next(self.policy.parameters()).dtype
 
-        external_policy_noise = kwargs.get("external_policy_noise", None)
-        if external_policy_noise is not None:
-            if isinstance(external_policy_noise, np.ndarray):
-                policy_noise = torch.from_numpy(external_policy_noise)
-            elif isinstance(external_policy_noise, torch.Tensor):
-                policy_noise = external_policy_noise
-            else:
-                raise TypeError(
-                    f"external_policy_noise must be np.ndarray or torch.Tensor, got {type(external_policy_noise)}"
-                )
-            policy_noise = policy_noise.to(device=device, dtype=torch.float32)
-        else:
-            chunk_size = int(getattr(self.policy.config, "chunk_size", self.num_action_chunks))
-            max_action_dim = int(getattr(self.policy.config, "max_action_dim", self.action_dim))
-            policy_noise = torch.randn(
-                B,
-                chunk_size,
-                max_action_dim,
-                device=device,
-                dtype=torch.float32,
-            )
+        chunk_size = self.num_action_chunks
+        max_action_dim = self.policy.config.max_action_dim
+        policy_noise = torch.randn(B, chunk_size, max_action_dim, device=device, dtype=policy_dtype)
 
-        action_norm = self.policy.predict_action_chunk(batch_obs, noise=policy_noise)
+        if "observation_before_policy" in kwargs:
+            batch_obs = kwargs["observation_before_policy"]
+            policy_noise = kwargs["external_policy_noise"]
+
+        action_norm, action_chunk = self.policy.select_action(batch_obs, noise=policy_noise, return_chunk=True)
+
+        if "observation_before_policy" in kwargs:
+            action_after_policy = kwargs["action_after_policy"]
+            action_chunk = kwargs["action_chunk"]
+
+            # check whether action_after_policy is close to action_norm
+            action_close = torch.allclose(action_after_policy, action_norm, atol=1e-5)
+            print(f"Action close to aligned: {action_close}")
+            # check whether action_chunk is close to action_chunk
+            chunk_close = torch.allclose(action_chunk, action_chunk, atol=1e-5)
+            print(f"Action chunk close to aligned: {chunk_close}")
+
         action_raw = self.policy_postprocessor(action_norm)
-        B, _, _ = action_norm.shape
+
+        if "observation_before_policy" in kwargs:
+            action_after_postprocessor = kwargs["action_after_postprocessor"]
+
+            # check whether action_after_postprocessor is close to action_raw
+            postproc_close = torch.allclose(torch.from_numpy(action_after_postprocessor), action_raw, atol=1e-5)
+            print(f"Action after postprocessor close to aligned: {postproc_close}")
 
         # Keep PPO bookkeeping noise aligned to action tensor shape.
         noise = policy_noise[..., : action_norm.shape[-1]]

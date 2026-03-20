@@ -291,36 +291,13 @@ class LiberoPPODDPNoRayRunner:
 
         align_pickle_path = os.environ.get("RLINF_ROLLOUT_ALIGN_PICKLE_PATH", "").strip()
         align_data: dict[str, Any] | None = None
-        align_steps: list[dict[str, Any]] = []
-        align_step_idx = 0
-
-        def _to_torch_obs(obs_dict: dict[str, Any]) -> dict[str, Any]:
-            converted: dict[str, Any] = {}
-            for key, value in obs_dict.items():
-                if key == "task_descriptions":
-                    converted[key] = [str(x) for x in value]
-                elif isinstance(value, np.ndarray):
-                    converted[key] = torch.from_numpy(value)
-                else:
-                    converted[key] = value
-            return converted
 
         if align_pickle_path:
             align_file = Path(align_pickle_path)
-            if not align_file.exists():
-                raise FileNotFoundError(f"RLINF_ROLLOUT_ALIGN_PICKLE_PATH not found: {align_file}")
             with open(align_file, "rb") as file:
                 align_data = pickle.load(file)
-            align_steps = list(align_data.get("steps", []))
-            if self.rank == 0:
-                print(
-                    f"[noray][align] loaded alignment pickle {align_file} with {len(align_steps)} steps",
-                    flush=True,
-                )
 
         obs, _ = env.reset()
-        if align_data is not None and "reset_obs" in align_data:
-            obs = _to_torch_obs(align_data["reset_obs"])
         # obs: dict of 
         #   "main_images": (num_envs, H, W, C) uint8
         #   "wrist_images": (num_envs, H, W, C) uint8
@@ -351,24 +328,24 @@ class LiberoPPODDPNoRayRunner:
                 if mode == "eval":
                     self.ddp_model.module.eval()
 
-                predict_kwargs: dict[str, Any] = {}
-                if align_data is not None and align_step_idx < len(align_steps):
-                    align_step = align_steps[align_step_idx]
-                    if "obs_before_step" in align_step:
-                        obs = _to_torch_obs(align_step["obs_before_step"])
-                    if "policy_noise" in align_step:
-                        predict_kwargs["external_policy_noise"] = align_step["policy_noise"]
+                if align_data is not None:
+                    predict_kwargs = {
+                        "external_policy_noise": align_data["policy_noise"],
+                        "observation_before_policy": align_data["observation_before_policy"],
+                        "action_after_policy": align_data["action_after_policy"],
+                        "action_chunk": align_data["action_chunk"],
+                        "action_after_postprocessor": align_data["action_after_postprocessor"],
+                    }
+                else:
+                    predict_kwargs = {}
 
                 with torch.no_grad():
-                    chunk_actions, rollout_result = self.ddp_model.module.predict_action_batch(
-                        obs,
-                        **predict_kwargs,
-                    )
+                    chunk_actions, rollout_result = \
+                        self.ddp_model.module.predict_action_batch(obs, **predict_kwargs)
 
                 obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = \
                     env.chunk_step(chunk_actions)
                 obs = obs_list[-1]
-                align_step_idx += 1
 
                 if save_video:
                     for step_idx, step_obs in enumerate(obs_list):

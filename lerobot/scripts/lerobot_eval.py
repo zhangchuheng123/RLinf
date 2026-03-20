@@ -176,9 +176,10 @@ def rollout(
     check_env_attributes_and_types(env)
 
     # ####### TEMP START #######
-    temp_dump_path = os.environ.get("LEROBOT_EVAL_DUMP_PATH", "").strip()
     align_pickle_path = os.environ.get("RLINF_ROLLOUT_ALIGN_PICKLE_PATH", "").strip()
-    align_records: dict[str, Any] | None = None
+    align_records: dict[str, Any] = {
+        "observation_from_env": deepcopy(observation)
+    }
 
     def _to_cpu_debug(obj: Any):
         if isinstance(obj, torch.Tensor):
@@ -256,21 +257,7 @@ def rollout(
         return int(chunk_size), int(max_action_dim)
     # ####### TEMP END #######
 
-    if align_pickle_path:
-        align_records = {
-            "meta": {
-                "source": "lerobot_eval.rollout",
-                "num_envs": int(env.num_envs),
-                "max_steps": int(max_steps),
-            },
-            "reset_obs": _to_cpu_debug(observation),
-            "steps": [],
-        }
-
     while not np.all(done) and step < max_steps:
-        # ####### TEMP START #######
-        observation_raw = deepcopy(observation)
-        # ####### TEMP END #######
 
         # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
         observation = preprocess_observation(observation)
@@ -301,108 +288,30 @@ def rollout(
             dtype=torch.float32,
         )
 
+        align_records['policy_noise'] = deepcopy(temp_policy_noise)
+        align_records['observation_before_policy'] = deepcopy(observation)
+
         with torch.inference_mode():
-            if select_action_align_dump_path := os.environ.get("RLINF_SELECT_ACTION_ALIGN_DUMP_PATH", "").strip():
-                policy.eval()
-                torch.backends.cudnn.benchmark = False
-                torch.backends.cudnn.deterministic = True
-                torch.backends.cuda.matmul.allow_tf32 = False
-                torch.backends.cudnn.allow_tf32 = False
-                action = policy._get_action_chunk(observation, noise=temp_policy_noise)
-            else:
-                action = policy.select_action(observation, noise=temp_policy_noise)
+            action, action_chunk = policy.select_action(observation, noise=temp_policy_noise, return_chunk=True)
 
-        import pdb; pdb.set_trace()
-
-        select_action_align_dump_path = os.environ.get("RLINF_SELECT_ACTION_ALIGN_DUMP_PATH", "").strip()
-        if select_action_align_dump_path:
-            align_payload = {
-                "meta": {
-                    "source": "lerobot_eval.select_action",
-                    "step": step,
-                },
-                "runtime": {
-                    "backend": _backend_snapshot(),
-                    "model": _model_fingerprint(policy),
-                },
-                "batch_obs": _to_cpu_debug(observation),
-                "step_noise": _to_cpu_debug(temp_policy_noise),
-                "norm_actions": _to_cpu_debug(action),
-                "batch_obs_fingerprint": _batch_fingerprint(observation),
-                "step_noise_fingerprint": _tensor_fingerprint(temp_policy_noise),
-                "norm_actions_fingerprint": _tensor_fingerprint(action),
-            }
-            align_dump_file = Path(select_action_align_dump_path)
-            align_dump_file.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(align_payload, align_dump_file)
-            logging.warning("[TEMP] select_action align dump written: %s", align_dump_file)
-            raise SystemExit(0)
-        
-        action_model_raw = action
+        align_records['action_after_policy'] = deepcopy(action)
+        align_records['action_chunk'] = deepcopy(action_chunk)
         action = postprocessor(action)
-        action_after_postprocessor = action
-
         action_transition = {ACTION: action}
         action_transition = env_postprocessor(action_transition)
         action = action_transition[ACTION]
-        action_numpy: np.ndarray = action.to("cpu").numpy()
+        action_numpy = action.to("cpu").numpy()
 
-        if align_records is not None:
-            align_records["steps"].append(
-                {
-                    "step": int(step),
-                    "obs_before_step": _to_cpu_debug(observation_raw),
-                    "policy_payload": _to_cpu_debug(observation),
-                    "policy_noise": _to_cpu_debug(temp_policy_noise),
-                    "model_raw_action": _to_cpu_debug(action_model_raw),
-                    "postprocessor_action": _to_cpu_debug(action_after_postprocessor),
-                    "env_action": _to_cpu_debug(action),
-                    "action_numpy": _to_cpu_debug(action_numpy),
-                }
-            )
+        align_records['action_after_postprocessor'] = deepcopy(action_numpy)
 
-        # ####### TEMP START #######
-        if temp_dump_path:
-            step_prefix = f"step_{step}_"
-            dump_payload = {
-                "meta": {
-                    "source": "lerobot_eval",
-                    "step": step,
-                    "max_steps": max_steps,
-                    "num_envs": env.num_envs,
-                },
-                f"{step_prefix}env_obs": _to_cpu_debug(observation_raw),
-                f"{step_prefix}policy_payload": _to_cpu_debug(observation),
-                f"{step_prefix}model_raw_action": _to_cpu_debug(action_model_raw),
-                f"{step_prefix}postprocessor_action": _to_cpu_debug(action_after_postprocessor),
-                f"{step_prefix}env_action": _to_cpu_debug(action),
-                f"{step_prefix}action_numpy": _to_cpu_debug(action_numpy),
-                f"{step_prefix}policy_noise": _to_cpu_debug(temp_policy_noise),
-                "obs_raw": _to_cpu_debug(observation_raw),
-                "policy_debug": {
-                    "policy_payload": _to_cpu_debug(observation),
-                    "policy_action_model_raw": _to_cpu_debug(action_model_raw),
-                    "policy_action_after_postprocessor": _to_cpu_debug(action_after_postprocessor),
-                    "policy_action_post": _to_cpu_debug(action),
-                    "policy_noise": _to_cpu_debug(temp_policy_noise),
-                },
-                "robot_action_to_send": _to_cpu_debug(action),
-                "action_numpy": _to_cpu_debug(action_numpy),
-            }
-            dump_file = Path(temp_dump_path)
-            dump_file.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(dump_payload, dump_file)
-            logging.warning("[TEMP] lerobot-eval dump written: %s", dump_file)
-            raise SystemExit(0)
-        # ####### TEMP END #######
+        if align_pickle_path:
+            with open(align_pickle_path, "wb") as f:
+                pickle.dump(align_records, f)
 
-        # Convert to CPU / numpy.
-        assert action_numpy.ndim == 2, "Action dimensions should be (batch, action_dim)"
+            raise SystemExit("Alignment data saved, exiting before stepping the environment.")
 
         # Apply the next action.
         observation, reward, terminated, truncated, info = env.step(action_numpy)
-        if align_records is not None:
-            align_records["steps"][-1]["obs_after_step"] = _to_cpu_debug(observation)
         if render_callback is not None:
             render_callback(env)
 

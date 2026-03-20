@@ -320,7 +320,9 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
     @torch.no_grad()
     def select_action(
-        self, batch: dict[str, Tensor], noise: Tensor | None = None, **kwargs: Unpack[ActionSelectKwargs]
+        self, batch: dict[str, Tensor], noise: Tensor | None = None,
+        return_chunk: bool = False,  
+        **kwargs: Unpack[ActionSelectKwargs]
     ) -> Tensor:
         """Select a single action given environment observations.
 
@@ -344,7 +346,10 @@ class SmolVLAPolicy(PreTrainedPolicy):
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
             self._queues[ACTION].extend(actions.transpose(0, 1)[: self.config.n_action_steps])
 
-        return self._queues[ACTION].popleft()
+        if return_chunk:
+            return self._queues[ACTION].popleft(), actions
+        else:
+            return self._queues[ACTION].popleft()
 
     def _check_get_actions_condition(self) -> bool:
         return len(self._queues[ACTION]) == 0

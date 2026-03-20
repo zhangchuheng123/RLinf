@@ -154,6 +154,19 @@ env -u RLINF_SELECT_ACTION_ALIGN_DUMP_PATH -u LEROBOT_EVAL_DUMP_PATH PYTHONPATH=
 
 # Q12
 
-请分析如下命令的执行过程，在 env.reset()/step() 后
+目前需要比较如下两个链路中的模型表现，并尝试对齐：
 
-export MUJOCO_GL=egl PYOPENGL_PLATFORM=egl TOKENIZERS_PARALLELISM=false; uv run --no-sync python -m lerobot.scripts.lerobot_eval --policy.path=/home/chuheng/RLinf/models/smolvla_libero --env.type=libero --env.task=libero_10 --eval.batch_size=2 --eval.n_episodes=2 --policy.use_amp=false --policy.device=cuda
+A）export MUJOCO_GL=egl PYOPENGL_PLATFORM=egl TOKENIZERS_PARALLELISM=false; uv run --no-sync python -m lerobot.scripts.lerobot_eval --policy.path=/home/chuheng/RLinf/models/smolvla_libero --env.type=libero --env.task=libero_10 --eval.batch_size=2 --eval.n_episodes=2 --policy.use_amp=false --policy.device=cuda
+B）_collect_rollouts 部分： DISABLE_WANDB=1 SAVE_ROLLOUT_VIDEO=true bash examples/embodiment/run_libero_ppo_smolvla_noray.sh
+
+要求：
+
+1）把这两个链路都改成在 env.reset()/step() 后进行 noise sample shape=(bsize, self.config.chunk_size, self.config.max_action_dim)，然后传递这个 noise 进 policy 内部，进行动作采样，从而在 condiiton on noise 的情况下消除随机性。
+2）在 A 链路中的 env.reset()/step() 后把 obs 等保存为 pickle；在 B 链路中读出该 pickle。后续对比的事情我来做。
+
+
+# Q13
+
+RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" PYTHONPATH=. MUJOCO_GL=egl PYOPENGL_PLATFORM=egl TOKENIZERS_PARALLELISM=false uv run --no-sync python -m lerobot.scripts.lerobot_eval --policy.path=models/smolvla_libero --env.type=libero --env.task=libero_10 --eval.batch_size=2 --eval.n_episodes=2 --policy.use_amp=false --policy.device=cuda --inference_precision=bf16 
+
+RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" DISABLE_WANDB=1 SAVE_ROLLOUT_VIDEO=true bash examples/embodiment/run_libero_ppo_smolvla_noray.sh
