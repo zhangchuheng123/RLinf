@@ -362,7 +362,7 @@ class LiberoEnv(gym.Env):
     def step(self, actions=None, auto_reset=True):
         """Step the environment with the given actions."""
         if isinstance(actions, torch.Tensor):
-            actions = actions.detach().cpu().numpy()
+            actions = actions.detach().cpu().float().numpy()
 
         self._elapsed_steps += 1
         raw_obs, _reward, terminations, info_lists = self.env.step(actions)

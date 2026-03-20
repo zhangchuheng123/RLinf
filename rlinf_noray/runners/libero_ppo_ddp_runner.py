@@ -3,7 +3,6 @@ import os
 import pickle
 import time
 from pathlib import Path
-from textwrap import wrap
 from dataclasses import dataclass
 from typing import Any
 
@@ -210,14 +209,15 @@ class LiberoPPODDPNoRayRunner:
         draw = ImageDraw.Draw(pil)
         font = ImageFont.load_default()
 
-        action_np = np.asarray(action, dtype=np.float32).reshape(-1)
+        if isinstance(action, torch.Tensor):
+            action_np = action.detach().to(dtype=torch.float32).cpu().numpy().reshape(-1)
+        else:
+            action_np = np.asarray(action, dtype=np.float32).reshape(-1)
         action_text = "[" + ", ".join(f"{v:+.2f}" for v in action_np.tolist()) + "]"
-        max_chars = max(12, frame.shape[1] // 8)
-        lines = ["action:"] + (wrap(action_text, width=max_chars) or [""])
-        text = "\n".join(lines)
-        _, _, _, text_h = draw.multiline_textbbox((0, 0), text, font=font, spacing=2)
+        text = f"action: {action_text}"
+        _, _, _, text_h = draw.textbbox((0, 0), text, font=font)
         y = max(0, frame.shape[0] - text_h - 8)
-        draw.multiline_text((8, y), text, fill=(255, 255, 255), font=font, spacing=2)
+        draw.text((8, y), text, fill=(255, 255, 255), font=font)
         return np.asarray(pil)
 
     @staticmethod
@@ -349,8 +349,8 @@ class LiberoPPODDPNoRayRunner:
 
                 if save_video:
                     for step_idx, step_obs in enumerate(obs_list):
-                        main_images = step_obs.get("main_images", None)
-                        task_descs = step_obs.get("task_descriptions", None)
+                        main_images = step_obs["main_images"]
+                        task_descs = step_obs["task_descriptions"]
                         if main_images is None or task_descs is None:
                             continue
                         step_actions = chunk_actions[:, step_idx]

@@ -350,7 +350,7 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         B = batch_obs["observation.state"].shape[0]
         policy_dtype = next(self.policy.parameters()).dtype
 
-        chunk_size = self.num_action_chunks
+        chunk_size = self.policy.config.chunk_size
         max_action_dim = self.policy.config.max_action_dim
         policy_noise = torch.randn(B, chunk_size, max_action_dim, device=device, dtype=policy_dtype)
 
@@ -362,16 +362,16 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
 
         if "observation_before_policy" in kwargs:
             action_after_policy = kwargs["action_after_policy"]
-            action_chunk = kwargs["action_chunk"]
+            action_chunk_align = kwargs["action_chunk"]
 
             # check whether action_after_policy is close to action_norm
             action_close = torch.allclose(action_after_policy, action_norm, atol=1e-5)
             print(f"Action close to aligned: {action_close}")
             # check whether action_chunk is close to action_chunk
-            chunk_close = torch.allclose(action_chunk, action_chunk, atol=1e-5)
+            chunk_close = torch.allclose(action_chunk_align, action_chunk, atol=1e-5)
             print(f"Action chunk close to aligned: {chunk_close}")
 
-        action_raw = self.policy_postprocessor(action_norm)
+        action_raw = self.policy_postprocessor(action_chunk)
 
         if "observation_before_policy" in kwargs:
             action_after_postprocessor = kwargs["action_after_postprocessor"]
@@ -381,9 +381,9 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
             print(f"Action after postprocessor close to aligned: {postproc_close}")
 
         # Keep PPO bookkeeping noise aligned to action tensor shape.
-        noise = policy_noise[..., : action_norm.shape[-1]]
+        noise = policy_noise[..., :action_norm.shape[-1]]
         timestep = torch.rand(B, device=device)  # [B]
-        prev_logprobs = self._compute_flow_logprob(action_norm, noise, timestep)  # [B]
+        prev_logprobs = self._compute_flow_logprob(action_chunk, noise, timestep)  # [B]
 
         states = env_obs["states"]
         prev_values = self._compute_value(states, device)  # [B]
