@@ -152,22 +152,8 @@ env -u RLINF_SELECT_ACTION_ALIGN_DUMP_PATH -u LEROBOT_EVAL_DUMP_PATH PYTHONPATH=
 - 直接从 bash 执行中推测各个参数数值，然后硬编码到测试代码中，要求测试代码简洁。
 
 
+# Q12
 
+请分析如下命令的执行过程，在 env.reset()/step() 后
 
-(base) chuheng@Evaluate002:~/RLinf$ bash examples/embodiment/run_libero_ppo_smolvla_noray.sh
-warning: Ignoring dangling temporary directory: `/home/chuheng/RLinf/.venv/lib/python3.11/site-packages/~okenizers-0.21.4.dist-info`
-warning: Ignoring dangling temporary directory: `/home/chuheng/RLinf/.venv/lib/python3.11/site-packages/~ransformers-4.51.3.dist-info`
-warning: Ignoring dangling temporary directory: `/home/chuheng/RLinf/.venv/lib/python3.11/site-packages/~ymnasium-0.29.1.dist-info`
-WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-I0000 00:00:1773908372.260126 4114858 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
-To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
-[info] using task orders [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-[info] using task orders [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-PyTorch version 2.6.0 available.
-TensorFlow version 2.21.0 available.
-Loading weights from local directory
-[SmolVLA] Using image_keys from config: ['image', 'image2']
-rollout[train]:   0%|          | 0/240 [00:00<?, ?it/s]
-
-[noray][ddp] epoch=0 samples=8 avg_loss=0.083703 rollout_success=0.0000
-rollout[train]:   2%|▏         | 4/240 [33:30<33:02:06, 503.92s/it]
+export MUJOCO_GL=egl PYOPENGL_PLATFORM=egl TOKENIZERS_PARALLELISM=false; uv run --no-sync python -m lerobot.scripts.lerobot_eval --policy.path=/home/chuheng/RLinf/models/smolvla_libero --env.type=libero --env.task=libero_10 --eval.batch_size=2 --eval.n_episodes=2 --policy.use_amp=false --policy.device=cuda

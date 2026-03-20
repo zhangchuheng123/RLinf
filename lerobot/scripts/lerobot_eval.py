@@ -51,6 +51,7 @@ import hashlib
 import json
 import logging
 import os
+import pickle
 import threading
 import time
 from collections import defaultdict
@@ -176,6 +177,8 @@ def rollout(
 
     # ####### TEMP START #######
     temp_dump_path = os.environ.get("LEROBOT_EVAL_DUMP_PATH", "").strip()
+    align_pickle_path = os.environ.get("RLINF_ROLLOUT_ALIGN_PICKLE_PATH", "").strip()
+    align_records: dict[str, Any] | None = None
 
     def _to_cpu_debug(obj: Any):
         if isinstance(obj, torch.Tensor):
@@ -236,7 +239,33 @@ def rollout(
             "cuda_matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
             "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
         }
+
+    def _resolve_policy_noise_shape() -> tuple[int, int]:
+        chunk_size = getattr(policy, "num_actions", None)
+        if chunk_size is None and hasattr(policy, "config"):
+            chunk_size = getattr(policy.config, "chunk_size", None)
+        if chunk_size is None:
+            raise AttributeError("Policy missing num_actions/chunk_size for deterministic noise sampling")
+
+        max_action_dim = getattr(policy, "max_action_dim", None)
+        if max_action_dim is None and hasattr(policy, "config"):
+            max_action_dim = getattr(policy.config, "max_action_dim", None)
+        if max_action_dim is None:
+            raise AttributeError("Policy missing max_action_dim for deterministic noise sampling")
+
+        return int(chunk_size), int(max_action_dim)
     # ####### TEMP END #######
+
+    if align_pickle_path:
+        align_records = {
+            "meta": {
+                "source": "lerobot_eval.rollout",
+                "num_envs": int(env.num_envs),
+                "max_steps": int(max_steps),
+            },
+            "reset_obs": _to_cpu_debug(observation),
+            "steps": [],
+        }
 
     while not np.all(done) and step < max_steps:
         # ####### TEMP START #######
@@ -257,35 +286,20 @@ def rollout(
 
         observation = preprocessor(observation)
         policy_dtype = next(policy.parameters()).dtype
-        observation = _cast_floating_tensors(observation, policy_dtype)
-        # ####### TEMP START #######
-        temp_policy_noise = None
-        if temp_dump_path:
-            num_actions = getattr(policy, "num_actions", None)
-            if num_actions is None and hasattr(policy, "config"):
-                num_actions = getattr(policy.config, "chunk_size", None)
-            if num_actions is None:
-                raise AttributeError(
-                    "Policy missing num_actions/chunk_size; cannot build deterministic TEMP noise"
-                )
-
-            max_action_dim = getattr(policy, "max_action_dim", None)
-            if max_action_dim is None and hasattr(policy, "config"):
-                max_action_dim = getattr(policy.config, "max_action_dim", None)
-            if max_action_dim is None:
-                raise AttributeError(
-                    "Policy missing max_action_dim; cannot build deterministic TEMP noise"
-                )
-            batch_size = int(env.num_envs)
-            policy_device = next(policy.parameters()).device
-            temp_policy_noise = torch.randn(
-                batch_size,
-                int(num_actions),
-                int(max_action_dim),
-                device=policy_device,
-                dtype=torch.float32,
-            )
-        # ####### TEMP END #######
+        state_key = "observation.state"
+        if state_key in observation and isinstance(observation[state_key], torch.Tensor):
+            if observation[state_key].dtype != policy_dtype:
+                observation[state_key] = observation[state_key].to(dtype=policy_dtype)
+        chunk_size, max_action_dim = _resolve_policy_noise_shape()
+        batch_size = int(env.num_envs)
+        policy_device = next(policy.parameters()).device
+        temp_policy_noise = torch.randn(
+            batch_size,
+            chunk_size,
+            max_action_dim,
+            device=policy_device,
+            dtype=torch.float32,
+        )
 
         with torch.inference_mode():
             if select_action_align_dump_path := os.environ.get("RLINF_SELECT_ACTION_ALIGN_DUMP_PATH", "").strip():
@@ -297,6 +311,8 @@ def rollout(
                 action = policy._get_action_chunk(observation, noise=temp_policy_noise)
             else:
                 action = policy.select_action(observation, noise=temp_policy_noise)
+
+        import pdb; pdb.set_trace()
 
         select_action_align_dump_path = os.environ.get("RLINF_SELECT_ACTION_ALIGN_DUMP_PATH", "").strip()
         if select_action_align_dump_path:
@@ -330,6 +346,20 @@ def rollout(
         action_transition = env_postprocessor(action_transition)
         action = action_transition[ACTION]
         action_numpy: np.ndarray = action.to("cpu").numpy()
+
+        if align_records is not None:
+            align_records["steps"].append(
+                {
+                    "step": int(step),
+                    "obs_before_step": _to_cpu_debug(observation_raw),
+                    "policy_payload": _to_cpu_debug(observation),
+                    "policy_noise": _to_cpu_debug(temp_policy_noise),
+                    "model_raw_action": _to_cpu_debug(action_model_raw),
+                    "postprocessor_action": _to_cpu_debug(action_after_postprocessor),
+                    "env_action": _to_cpu_debug(action),
+                    "action_numpy": _to_cpu_debug(action_numpy),
+                }
+            )
 
         # ####### TEMP START #######
         if temp_dump_path:
@@ -371,6 +401,8 @@ def rollout(
 
         # Apply the next action.
         observation, reward, terminated, truncated, info = env.step(action_numpy)
+        if align_records is not None:
+            align_records["steps"][-1]["obs_after_step"] = _to_cpu_debug(observation)
         if render_callback is not None:
             render_callback(env)
 
@@ -427,6 +459,13 @@ def rollout(
 
     if hasattr(policy, "use_original_modules"):
         policy.use_original_modules()
+
+    if align_records is not None:
+        align_file = Path(align_pickle_path)
+        align_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(align_file, "wb") as file:
+            pickle.dump(align_records, file)
+        logging.warning("[ALIGN] rollout alignment pickle written: %s", align_file)
 
     return ret
 

@@ -1,7 +1,6 @@
 import copy
-import contextlib
-import json
 import os
+import pickle
 import time
 from pathlib import Path
 from textwrap import wrap
@@ -21,11 +20,6 @@ import rlinf_noray.algorithms  # noqa: F401
 from rlinf_noray.algorithms.registry import policy_loss
 from rlinf_noray.envs import get_env_cls
 from rlinf_noray.envs.action_utils import prepare_actions
-from rlinf_noray.envs.libero.utils import (
-    get_libero_image,
-    get_libero_wrist_image,
-    quat2axisangle,
-)
 from rlinf_noray.models import get_model
 from rlinf_noray.utils.metric_logger import MetricLogger
 
@@ -66,79 +60,6 @@ def _reduce_to_batch(tensor: torch.Tensor) -> torch.Tensor:
     if tensor.ndim == 1:
         return tensor.float()
     return tensor.reshape(tensor.shape[0], -1).mean(dim=1).float()
-
-
-def _to_numpy(obj: Any) -> np.ndarray:
-    if isinstance(obj, torch.Tensor):
-        return obj.detach().cpu().numpy()
-    if isinstance(obj, np.ndarray):
-        return obj
-    raise TypeError(f"Unsupported type for numpy conversion: {type(obj)}")
-
-
-def _max_abs_diff(a: Any, b: Any) -> float:
-    a_np = _to_numpy(a).astype(np.float64)
-    b_np = _to_numpy(b).astype(np.float64)
-    if a_np.shape != b_np.shape:
-        raise ValueError(f"Shape mismatch: {a_np.shape} vs {b_np.shape}")
-    return float(np.max(np.abs(a_np - b_np)))
-
-
-class _ChunkJsonlProfiler:
-    def __init__(
-        self,
-        *,
-        output_path: str,
-        rank: int,
-        world_size: int,
-        sync_cuda: bool,
-    ) -> None:
-        if not output_path:
-            raise ValueError("Profiler output path must be non-empty")
-
-        target_path = Path(output_path)
-        if world_size > 1:
-            target_path = target_path.with_name(
-                f"{target_path.stem}.rank{rank}{target_path.suffix}"
-            )
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-
-        self._file = target_path.open("a", encoding="utf-8")
-        self._path = target_path
-        self._rank = rank
-        self._sync_cuda = bool(sync_cuda)
-        self._timings: dict[str, float] = {}
-
-    @property
-    def path(self) -> str:
-        return str(self._path)
-
-    @contextlib.contextmanager
-    def profile(self, key: str):
-        if self._sync_cuda and torch.cuda.is_available():
-            torch.cuda.synchronize()
-        start = time.perf_counter()
-        try:
-            yield
-        finally:
-            if self._sync_cuda and torch.cuda.is_available():
-                torch.cuda.synchronize()
-            elapsed = time.perf_counter() - start
-            self._timings[key] = self._timings.get(key, 0.0) + float(elapsed)
-
-    def flush_chunk(self, *, payload: dict[str, Any]) -> None:
-        record = {
-            "time_unix": time.time(),
-            "rank": self._rank,
-            **payload,
-            "timings_s": self._timings,
-        }
-        self._file.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self._file.flush()
-        self._timings = {}
-
-    def close(self) -> None:
-        self._file.close()
 
 
 class LiberoPPODDPNoRayRunner:
@@ -243,45 +164,22 @@ class LiberoPPODDPNoRayRunner:
         )
         self.metric_logger = MetricLogger(cfg) if self.rank == 0 else None
 
-        self._chunk_profiler: _ChunkJsonlProfiler | None = None
-        self._chunk_profile_output_path = os.environ.get("RLINF_COLLECT_PROFILE_PATH", "").strip()
-        if self._chunk_profile_output_path:
-            profile_sync_cuda = os.environ.get("RLINF_COLLECT_PROFILE_SYNC_CUDA", "1") == "1"
-            self._chunk_profiler = _ChunkJsonlProfiler(
-                output_path=self._chunk_profile_output_path,
-                rank=self.rank,
-                world_size=self.world_size,
-                sync_cuda=profile_sync_cuda,
-            )
-            if self.rank == 0:
-                print(
-                    f"[profile] collect profiler enabled: {self._chunk_profiler.path}",
-                    flush=True,
-                )
-
         eval_video_cfg = cfg.env.eval.get("video_cfg", {})
-        self.save_eval_video = bool(eval_video_cfg.get("save_video", False))
-        self.eval_video_base_dir = str(eval_video_cfg.get("video_base_dir", ""))
-
-        # Optional stage-level debug prints for collect rollout hang diagnosis.
-        self._collect_debug_verbose = os.environ.get("RLINF_COLLECT_DEBUG_VERBOSE", "0") == "1"
-        self._collect_debug_max_chunks = int(os.environ.get("RLINF_COLLECT_DEBUG_MAX_CHUNKS", "3"))
-
-        # ####### TEMP START #######
-        self._temp_alignment_sample_path = os.environ.get("RLINF_ROLLOUT_COMPARE_DUMP_PATH", "").strip()
-        self._temp_alignment_sample = None
-        self._temp_alignment_compared = False
-        self._temp_alignment_log_path = os.environ.get("RLINF_ALIGN_ACTION_LOG_PATH", "").strip()
-        if self._temp_alignment_sample_path:
-            sample_path = Path(self._temp_alignment_sample_path)
-            if not sample_path.exists():
-                raise FileNotFoundError(f"RLINF_ROLLOUT_COMPARE_DUMP_PATH not found: {sample_path}")
-            self._temp_alignment_sample = torch.load(sample_path, map_location="cpu", weights_only=False)
-            if not self._temp_alignment_log_path:
-                self._temp_alignment_log_path = str(
-                    Path("/home/chuheng/RLinf/logs/rollout_alignment/noray_lerobot_action_compare.json")
-                )
-        # ####### TEMP END #######
+        self.save_eval_video = bool(
+            cfg.runner.get("save_eval_video", eval_video_cfg.get("save_eval_video", True))
+        )
+        self.save_rollout_video = bool(cfg.runner.get("save_rollout_video", False))
+        self.eval_video_base_dir = str(
+            cfg.runner.get("eval_video_base_dir", eval_video_cfg.get("video_base_dir", ""))
+        )
+        default_rollout_video_base_dir = os.path.join(
+            str(cfg.runner.logger.get("log_path", "logs")),
+            "video",
+            "rollout",
+        )
+        self.rollout_video_base_dir = str(
+            cfg.runner.get("rollout_video_base_dir", default_rollout_video_base_dir)
+        )
 
     @staticmethod
     def _to_uint8_hwc(img: Any) -> np.ndarray:
@@ -333,10 +231,14 @@ class LiberoPPODDPNoRayRunner:
         frames_by_env: list[list[np.ndarray]],
         instructions_by_env: list[str],
         epoch: int,
+        mode: str = "eval",
     ) -> None:
-        if not self.eval_video_base_dir:
+        base_dir_str = (
+            self.eval_video_base_dir if mode == "eval" else self.rollout_video_base_dir
+        )
+        if not base_dir_str:
             return
-        base_dir = Path(self.eval_video_base_dir)
+        base_dir = Path(base_dir_str)
         base_dir.mkdir(parents=True, exist_ok=True)
 
         traj_offset = self.rank * len(frames_by_env)
@@ -345,323 +247,13 @@ class LiberoPPODDPNoRayRunner:
                 continue
             traj_idx = traj_offset + local_idx
             instruction_slug = self._instruction_to_slug(instructions_by_env[local_idx])
-            out_path = base_dir / f"val_epoch_{epoch}_traj_{traj_idx:02d}_{instruction_slug}.mp4"
+            out_path = base_dir / f"{mode}_epoch_{epoch}_traj_{traj_idx:02d}_{instruction_slug}.mp4"
             imageio.mimsave(str(out_path), frames, fps=15)
 
     def _reduce_sums(self, sums: torch.Tensor) -> torch.Tensor:
         sums = sums.to(self.device, dtype=torch.float64)
         dist.all_reduce(sums, op=dist.ReduceOp.SUM)
         return sums
-
-    def _collect_debug_print(self, message: str) -> None:
-        if self._collect_debug_verbose and self.rank == 0:
-            print(f"[collect-debug] {message}", flush=True)
-
-    # ####### TEMP START #######
-    @staticmethod
-    def _temp_to_hwc_uint8(images: Any) -> torch.Tensor:
-        arr = _to_numpy(images)
-        if arr.ndim != 4:
-            raise ValueError(f"Expected image batch rank=4, got shape={arr.shape}")
-        if arr.shape[1] in (1, 3) and arr.shape[-1] not in (1, 3):
-            arr = np.transpose(arr, (0, 2, 3, 1))
-        if arr.dtype != np.uint8:
-            arr = arr.astype(np.float32)
-            if arr.max() <= 1.0:
-                arr = arr * 255.0
-            arr = np.clip(arr, 0, 255).astype(np.uint8)
-        return torch.from_numpy(arr)
-
-    @staticmethod
-    def _temp_compute_state_from_raw(obs_raw: dict[str, Any]) -> torch.Tensor:
-        pos = _to_numpy(obs_raw["robot0_eef_pos"])
-        quat = _to_numpy(obs_raw["robot0_eef_quat"])
-        gripper = _to_numpy(obs_raw["robot0_gripper_qpos"])
-        if pos.ndim != 2 or quat.ndim != 2 or gripper.ndim != 2:
-            raise ValueError(
-                "robot0_eef_pos/quat/gripper must be rank-2 batched arrays"
-            )
-        axis_angles = np.stack([quat2axisangle(quat[i].copy()) for i in range(quat.shape[0])], axis=0)
-        states = np.concatenate([pos, axis_angles, gripper], axis=1).astype(np.float32)
-        return torch.from_numpy(states)
-
-    def _temp_build_env_obs_from_sample(self, sample: dict[str, Any]) -> dict[str, Any]:
-        if "noray_obs_reference" in sample:
-            ref = _to_cpu(sample["noray_obs_reference"])
-            return {
-                "main_images": self._temp_to_hwc_uint8(ref["main_images"]),
-                "wrist_images": self._temp_to_hwc_uint8(ref["wrist_images"]),
-                "states": _to_cpu(ref["states"]).float(),
-                "task_descriptions": list(ref["task_descriptions"]),
-            }
-
-        if "obs_raw" not in sample:
-            raise KeyError("Alignment sample missing 'obs_raw'")
-        obs_raw = sample["obs_raw"]
-
-        if "main_images" in obs_raw and "states" in obs_raw and "task_descriptions" in obs_raw:
-            env_obs = {
-                "main_images": self._temp_to_hwc_uint8(obs_raw["main_images"]),
-                "states": _to_cpu(obs_raw["states"]).float(),
-                "task_descriptions": list(obs_raw["task_descriptions"]),
-            }
-            if "wrist_images" in obs_raw:
-                env_obs["wrist_images"] = self._temp_to_hwc_uint8(obs_raw["wrist_images"])
-            return env_obs
-
-        if "agentview_image" in obs_raw and "robot0_eef_pos" in obs_raw:
-            batch_size = int(_to_numpy(obs_raw["agentview_image"]).shape[0])
-            main_images = np.stack(
-                [get_libero_image({"agentview_image": _to_numpy(obs_raw["agentview_image"])[i]}) for i in range(batch_size)],
-                axis=0,
-            )
-            if "robot0_eye_in_hand_image" in obs_raw:
-                wrist_images = np.stack(
-                    [
-                        get_libero_wrist_image(
-                            {"robot0_eye_in_hand_image": _to_numpy(obs_raw["robot0_eye_in_hand_image"])[i]}
-                        )
-                        for i in range(batch_size)
-                    ],
-                    axis=0,
-                )
-            else:
-                wrist_images = main_images.copy()
-
-            task_key = "task" if "task" in obs_raw else "task_descriptions"
-            if task_key not in obs_raw:
-                raise KeyError("obs_raw missing task/task_descriptions for TEMP alignment")
-
-            task_values = obs_raw[task_key]
-            task_descriptions = [str(x) for x in list(task_values)]
-            if len(task_descriptions) != batch_size:
-                raise ValueError(
-                    f"task length mismatch: {len(task_descriptions)} vs batch_size {batch_size}"
-                )
-
-            return {
-                "main_images": self._temp_to_hwc_uint8(main_images),
-                "wrist_images": self._temp_to_hwc_uint8(wrist_images),
-                "states": self._temp_compute_state_from_raw(obs_raw),
-                "task_descriptions": task_descriptions,
-            }
-
-        if "pixels" in obs_raw and "robot_state" in obs_raw:
-            pixels = obs_raw["pixels"]
-            robot_state = obs_raw["robot_state"]
-
-            if "image" not in pixels:
-                raise KeyError("obs_raw['pixels'] missing 'image'")
-            if "image2" not in pixels:
-                raise KeyError("obs_raw['pixels'] missing 'image2'")
-
-            main_images = self._temp_to_hwc_uint8(pixels["image"])
-            wrist_images = self._temp_to_hwc_uint8(pixels["image2"])
-
-            if "eef" not in robot_state or "gripper" not in robot_state:
-                raise KeyError("obs_raw['robot_state'] missing eef/gripper")
-            eef = robot_state["eef"]
-            gripper = robot_state["gripper"]
-            if "pos" not in eef or "quat" not in eef or "qpos" not in gripper:
-                raise KeyError("obs_raw['robot_state'] missing eef.pos/eef.quat/gripper.qpos")
-
-            axis_angles = np.stack(
-                [quat2axisangle(_to_numpy(eef["quat"])[i].copy()) for i in range(_to_numpy(eef["quat"]).shape[0])],
-                axis=0,
-            )
-            states = np.concatenate(
-                [_to_numpy(eef["pos"]), axis_angles, _to_numpy(gripper["qpos"])], axis=1
-            ).astype(np.float32)
-
-            task_descriptions = None
-            if "policy_debug" in sample:
-                payload = sample["policy_debug"].get("policy_payload", {})
-                task = payload.get("task", None)
-                if task is not None:
-                    task_descriptions = [str(x) for x in list(task)]
-            if task_descriptions is None:
-                raise KeyError(
-                    "Alignment sample missing task descriptions (expected policy_debug.policy_payload['task'])"
-                )
-
-            return {
-                "main_images": main_images,
-                "wrist_images": wrist_images,
-                "states": torch.from_numpy(states),
-                "task_descriptions": task_descriptions,
-            }
-
-        raise KeyError("Unsupported alignment sample format for obs replacement")
-
-    @staticmethod
-    def _temp_get_external_noise(sample: dict[str, Any]) -> torch.Tensor:
-        if "policy_debug" not in sample:
-            raise KeyError("Alignment sample missing 'policy_debug'")
-        sample_debug = sample["policy_debug"]
-        if "policy_noise" not in sample_debug:
-            raise KeyError("Alignment sample missing policy_debug['policy_noise']")
-        policy_noise = sample_debug["policy_noise"]
-        if policy_noise is None:
-            raise ValueError("policy_debug['policy_noise'] is None")
-        return _to_cpu(policy_noise).float()
-
-    @staticmethod
-    def _temp_compare_first_action(
-        sample: dict[str, Any],
-        predict_env_obs: dict[str, Any],
-        rollout_payload: dict[str, Any] | None,
-        rollout_norm_actions: torch.Tensor,
-        rollout_post_actions: torch.Tensor | None,
-        chunk_actions: torch.Tensor,
-        alignment_log_path: str | None,
-    ) -> None:
-        step_prefix = "step_0_"
-
-        required = [
-            f"{step_prefix}env_obs",
-            f"{step_prefix}policy_payload",
-            f"{step_prefix}model_raw_action",
-            f"{step_prefix}postprocessor_action",
-            f"{step_prefix}env_action",
-        ]
-        for key in required:
-            if key not in sample:
-                raise KeyError(f"Alignment sample missing {key}")
-
-        def _cmp(stage_name: str, expected: Any, actual: Any) -> dict[str, Any]:
-            expected_np = _to_numpy(expected).astype(np.float64)
-            actual_np = _to_numpy(actual).astype(np.float64)
-            if expected_np.ndim == 3:
-                expected_np = expected_np[:, 0, :]
-            if actual_np.ndim == 3:
-                actual_np = actual_np[:, 0, :]
-
-            min_batch = min(expected_np.shape[0], actual_np.shape[0])
-            if min_batch <= 0:
-                raise ValueError(f"Empty batch in {stage_name} comparison")
-
-            expected_trim = expected_np[:min_batch]
-            actual_trim = actual_np[:min_batch]
-            if expected_trim.shape != actual_trim.shape:
-                raise ValueError(
-                    f"Shape mismatch in {stage_name}: {expected_trim.shape} vs {actual_trim.shape}"
-                )
-
-            diff = float(np.max(np.abs(expected_trim - actual_trim)))
-            equal = bool(np.array_equal(expected_trim, actual_trim))
-            allclose = bool(np.allclose(expected_trim, actual_trim, atol=1e-6, rtol=0.0))
-            print(
-                (
-                    f"[TEMP][align] {stage_name}: "
-                    f"max_abs_diff={diff:.6e}, equal={equal}, allclose_atol1e-6={allclose}"
-                ),
-                flush=True,
-            )
-            return {
-                "max_abs_diff": diff,
-                "equal": equal,
-                "allclose_atol1e-6": allclose,
-            }
-
-        sample_env_obs = sample[f"{step_prefix}env_obs"]
-        if "pixels" not in sample_env_obs or "robot_state" not in sample_env_obs:
-            raise KeyError(f"{step_prefix}env_obs missing pixels/robot_state")
-
-        sample_state = np.concatenate(
-            [
-                _to_numpy(sample_env_obs["robot_state"]["eef"]["pos"]),
-                np.stack(
-                    [
-                        quat2axisangle(q.copy())
-                        for q in _to_numpy(sample_env_obs["robot_state"]["eef"]["quat"])
-                    ],
-                    axis=0,
-                ),
-                _to_numpy(sample_env_obs["robot_state"]["gripper"]["qpos"]),
-            ],
-            axis=1,
-        ).astype(np.float64)
-
-        env_obs_diffs = {
-            "main_images": _cmp(
-                f"{step_prefix}env_obs.main_images",
-                sample_env_obs["pixels"]["image"],
-                predict_env_obs["main_images"],
-            ),
-            "wrist_images": _cmp(
-                f"{step_prefix}env_obs.wrist_images",
-                sample_env_obs["pixels"]["image2"],
-                predict_env_obs["wrist_images"],
-            ),
-            "states": _cmp(
-                f"{step_prefix}env_obs.states",
-                sample_state,
-                predict_env_obs["states"],
-            ),
-        }
-
-        if rollout_payload is None:
-            raise KeyError("Rollout result missing debug_policy_payload for TEMP alignment")
-
-        sample_payload = sample[f"{step_prefix}policy_payload"]
-        payload_compare_keys = [
-            "observation.images.image",
-            "observation.images.image2",
-            "observation.state",
-            "observation.language.tokens",
-            "observation.language.attention_mask",
-        ]
-        payload_diffs: dict[str, Any] = {}
-        for key in payload_compare_keys:
-            if key not in sample_payload:
-                raise KeyError(f"Alignment sample missing payload key: {key}")
-            if key not in rollout_payload:
-                raise KeyError(f"Rollout payload missing key: {key}")
-            payload_diffs[key] = _cmp(f"{step_prefix}policy_payload.{key}", sample_payload[key], rollout_payload[key])
-
-        # TODO(alignment): Validation point for step_0_model_raw_action mismatch.
-        # This compares lerobot dump `step_0_model_raw_action` against no-ray
-        # `norm_actions[:, 0, :]` produced in the same first-step rollout.
-        model_raw_diff = _cmp(
-            f"{step_prefix}model_raw_action",
-            sample[f"{step_prefix}model_raw_action"],
-            rollout_norm_actions[:, 0, :],
-        )
-
-        if rollout_post_actions is None:
-            raise KeyError("Rollout result missing debug_action_post for TEMP alignment")
-        post_action_diff = _cmp(
-            f"{step_prefix}postprocessor_action",
-            sample[f"{step_prefix}postprocessor_action"],
-            rollout_post_actions[:, 0, :],
-        )
-
-        env_action_diff = _cmp(
-            f"{step_prefix}env_action",
-            sample[f"{step_prefix}env_action"],
-            chunk_actions[:, 0, :],
-        )
-
-        if alignment_log_path:
-            out_path = Path(alignment_log_path)
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "meta": {
-                    "source": "noray_alignment_compare",
-                    "step": 0,
-                },
-                "diffs": {
-                    f"{step_prefix}env_obs": env_obs_diffs,
-                    f"{step_prefix}policy_payload": payload_diffs,
-                    f"{step_prefix}model_raw_action": model_raw_diff,
-                    f"{step_prefix}postprocessor_action": post_action_diff,
-                    f"{step_prefix}env_action": env_action_diff,
-                },
-            }
-            with out_path.open("w", encoding="utf-8") as file:
-                json.dump(payload, file, ensure_ascii=False, indent=2)
-            print(f"[TEMP][align] wrote action compare file: {out_path}", flush=True)
-    # ####### TEMP END #######
 
     def _pack_forward_inputs(self, rollout_result: dict[str, Any]) -> dict[str, Any]:
         if "forward_inputs" in rollout_result:
@@ -696,35 +288,45 @@ class LiberoPPODDPNoRayRunner:
         save_video: bool = False,
         video_epoch: int = 0,
     ) -> tuple[list[RolloutSample], dict[str, float]]:
-        self._collect_debug_print(
-            (
-                f"rollout start: mode={mode}, collect_samples={collect_samples}, "
-                f"rollout_epoch={rollout_epoch}, chunk_steps={chunk_steps}, num_envs={env.num_envs}"
-            )
-        )
-        profile_reset = (
-            self._chunk_profiler.profile("env_reset")
-            if self._chunk_profiler is not None
-            else contextlib.nullcontext()
-        )
-        t0_reset = time.perf_counter()
-        with profile_reset:
-            obs, _ = env.reset()
-        self._collect_debug_print(
-            f"env.reset done in {(time.perf_counter() - t0_reset):.3f}s"
-        )
 
-        if self._chunk_profiler is not None:
-            self._chunk_profiler.flush_chunk(
-                payload={
-                    "event": "rollout_init",
-                    "mode": mode,
-                    "collect_samples": collect_samples,
-                    "rollout_epoch": int(rollout_epoch),
-                    "chunk_steps": int(chunk_steps),
-                    "num_envs": int(env.num_envs),
-                }
-            )
+        align_pickle_path = os.environ.get("RLINF_ROLLOUT_ALIGN_PICKLE_PATH", "").strip()
+        align_data: dict[str, Any] | None = None
+        align_steps: list[dict[str, Any]] = []
+        align_step_idx = 0
+
+        def _to_torch_obs(obs_dict: dict[str, Any]) -> dict[str, Any]:
+            converted: dict[str, Any] = {}
+            for key, value in obs_dict.items():
+                if key == "task_descriptions":
+                    converted[key] = [str(x) for x in value]
+                elif isinstance(value, np.ndarray):
+                    converted[key] = torch.from_numpy(value)
+                else:
+                    converted[key] = value
+            return converted
+
+        if align_pickle_path:
+            align_file = Path(align_pickle_path)
+            if not align_file.exists():
+                raise FileNotFoundError(f"RLINF_ROLLOUT_ALIGN_PICKLE_PATH not found: {align_file}")
+            with open(align_file, "rb") as file:
+                align_data = pickle.load(file)
+            align_steps = list(align_data.get("steps", []))
+            if self.rank == 0:
+                print(
+                    f"[noray][align] loaded alignment pickle {align_file} with {len(align_steps)} steps",
+                    flush=True,
+                )
+
+        obs, _ = env.reset()
+        if align_data is not None and "reset_obs" in align_data:
+            obs = _to_torch_obs(align_data["reset_obs"])
+        # obs: dict of 
+        #   "main_images": (num_envs, H, W, C) uint8
+        #   "wrist_images": (num_envs, H, W, C) uint8
+        #   "task_descriptions": list of str
+        #   "states": (num_envs, state_dim) float32
+
         samples: list[RolloutSample] = []
         frames_by_env: list[list[np.ndarray]] = []
         instructions_by_env: list[str] = []
@@ -742,147 +344,31 @@ class LiberoPPODDPNoRayRunner:
             disable=self.rank != 0,
             leave=False,
         )
-        try:
-            for rollout_idx in range(rollout_epoch):
-                for chunk_idx in range(chunk_steps):
-                    debug_chunk = (
-                        self._collect_debug_verbose
-                        and self.rank == 0
-                        and rollout_idx == 0
-                        and chunk_idx < self._collect_debug_max_chunks
-                    )
-                    chunk_start = time.perf_counter()
-                    if debug_chunk:
-                        self._collect_debug_print(
-                            f"chunk[{rollout_idx},{chunk_idx}] start"
-                        )
-                # ####### TEMP START #######
-                    predict_env_obs = obs
-                    predict_kwargs: dict[str, Any] = {}
-                    if self._temp_alignment_sample is not None and not self._temp_alignment_compared:
-                        predict_env_obs = self._temp_build_env_obs_from_sample(self._temp_alignment_sample)
-                        predict_kwargs["external_policy_noise"] = self._temp_get_external_noise(
-                            self._temp_alignment_sample
-                        )
-                        if self.rank == 0:
-                            print(
-                                "[TEMP][align] replaced env obs with dump obs_raw and injected dump policy_noise",
-                                flush=True,
-                            )
-                # ####### TEMP END #######
 
-                    profile_predict = (
-                        self._chunk_profiler.profile("predict_action_batch")
-                        if self._chunk_profiler is not None
-                        else contextlib.nullcontext()
-                    )
-                    if debug_chunk:
-                        self._collect_debug_print(
-                            f"chunk[{rollout_idx},{chunk_idx}] entering predict_action_batch"
-                        )
-                    t0_predict = time.perf_counter()
-                    with profile_predict:
-                        module_was_training = self.ddp_model.module.training
-                        if mode == "eval":
-                            self.ddp_model.module.eval()
-                        try:
-                            with torch.no_grad():
-                                raw_actions, rollout_result = self.ddp_model.module.predict_action_batch(
-                                    env_obs=predict_env_obs,
-                                    mode=mode,
-                                    **predict_kwargs,
-                                )
-                                # raw_actions: (num_envs, num_action_chunks, action_dim)
-                        finally:
-                            if mode == "eval" and module_was_training:
-                                self.ddp_model.module.train()
-                    if debug_chunk:
-                        self._collect_debug_print(
-                            (
-                                f"chunk[{rollout_idx},{chunk_idx}] predict_action_batch done "
-                                f"in {(time.perf_counter() - t0_predict):.3f}s"
-                            )
-                        )
+        for rollout_idx in range(rollout_epoch):
+            for chunk_idx in range(chunk_steps):
 
-                    profile_prepare = (
-                        self._chunk_profiler.profile("prepare_actions")
-                        if self._chunk_profiler is not None
-                        else contextlib.nullcontext()
-                    )
-                    if debug_chunk:
-                        self._collect_debug_print(
-                            f"chunk[{rollout_idx},{chunk_idx}] entering prepare_actions"
-                        )
-                    t0_prepare = time.perf_counter()
-                    with profile_prepare:
-                        chunk_actions = torch.as_tensor(raw_actions)
-                        chunk_actions = prepare_actions(
-                            raw_chunk_actions=chunk_actions,
-                            env_type=self.cfg.env.train.env_type,
-                            model_type=self.cfg.actor.model.model_type,
-                            num_action_chunks=self.cfg.actor.model.num_action_chunks,
-                            action_dim=self.cfg.actor.model.action_dim,
-                            policy=self.cfg.actor.model.get("policy_setup", None),
-                            wm_env_type=self.cfg.env.train.get("wm_env_type", None),
-                        )
+                if mode == "eval":
+                    self.ddp_model.module.eval()
 
-                        if isinstance(chunk_actions, np.ndarray):
-                            chunk_actions = torch.from_numpy(chunk_actions)
-                    if debug_chunk:
-                        self._collect_debug_print(
-                            (
-                                f"chunk[{rollout_idx},{chunk_idx}] prepare_actions done "
-                                f"in {(time.perf_counter() - t0_prepare):.3f}s"
-                            )
-                        )
+                predict_kwargs: dict[str, Any] = {}
+                if align_data is not None and align_step_idx < len(align_steps):
+                    align_step = align_steps[align_step_idx]
+                    if "obs_before_step" in align_step:
+                        obs = _to_torch_obs(align_step["obs_before_step"])
+                    if "policy_noise" in align_step:
+                        predict_kwargs["external_policy_noise"] = align_step["policy_noise"]
 
-                # ####### TEMP START #######
-                if (
-                    self._temp_alignment_sample is not None
-                    and not self._temp_alignment_compared
-                    and self.rank == 0
-                ):
-                    # TODO(alignment): Mainflow trigger of step_0_* validation.
-                    # `_temp_compare_first_action` performs stage-by-stage checks,
-                    # including `step_0_model_raw_action` mismatch validation.
-                    rollout_payload = rollout_result.get("debug_policy_payload", None)
-                    rollout_post_actions = rollout_result.get("debug_action_post", None)
-                    rollout_norm_actions = rollout_result.get("norm_actions", None)
-                    if rollout_norm_actions is None:
-                        raise KeyError("Rollout result missing norm_actions for TEMP alignment")
-                    self._temp_compare_first_action(
-                        self._temp_alignment_sample,
-                        predict_env_obs,
-                        rollout_payload,
-                        rollout_norm_actions,
-                        rollout_post_actions,
-                        chunk_actions,
-                        self._temp_alignment_log_path,
+                with torch.no_grad():
+                    chunk_actions, rollout_result = self.ddp_model.module.predict_action_batch(
+                        obs,
+                        **predict_kwargs,
                     )
-                    self._temp_alignment_compared = True
-                # ####### TEMP END #######
 
-                profile_env = (
-                    self._chunk_profiler.profile("env_chunk_step")
-                    if self._chunk_profiler is not None
-                    else contextlib.nullcontext()
-                )
-                if debug_chunk:
-                    self._collect_debug_print(
-                        f"chunk[{rollout_idx},{chunk_idx}] entering env.chunk_step"
-                    )
-                t0_env = time.perf_counter()
-                with profile_env:
-                    obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = \
-                        env.chunk_step(chunk_actions)
-                    obs = obs_list[-1]
-                if debug_chunk:
-                    self._collect_debug_print(
-                        (
-                            f"chunk[{rollout_idx},{chunk_idx}] env.chunk_step done "
-                            f"in {(time.perf_counter() - t0_env):.3f}s"
-                        )
-                    )
+                obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = \
+                    env.chunk_step(chunk_actions)
+                obs = obs_list[-1]
+                align_step_idx += 1
 
                 if save_video:
                     for step_idx, step_obs in enumerate(obs_list):
@@ -900,86 +386,40 @@ class LiberoPPODDPNoRayRunner:
                             )
                             frames_by_env[env_idx].append(frame)
 
-                profile_metrics = (
-                    self._chunk_profiler.profile("compute_metrics")
-                    if self._chunk_profiler is not None
-                    else contextlib.nullcontext()
-                )
-                with profile_metrics:
-                    chunk_returns = chunk_rewards.sum(dim=1).float().cpu()
-                    dones = torch.logical_or(
-                        chunk_terminations[:, -1], chunk_truncations[:, -1]
-                    ).float().cpu()
+                chunk_returns = chunk_rewards.sum(dim=1).float().cpu()
+                dones = torch.logical_or(
+                    chunk_terminations[:, -1], chunk_truncations[:, -1]
+                ).float().cpu()
 
-                    success = chunk_terminations[:, -1].float().cpu()
-                    if infos_list and isinstance(infos_list[-1], dict):
-                        episode_info = infos_list[-1].get("episode")
-                        if isinstance(episode_info, dict) and "success_at_end" in episode_info:
-                            success_at_end = episode_info["success_at_end"]
-                            if isinstance(success_at_end, torch.Tensor):
-                                success = success_at_end.float().cpu()
+                success = chunk_terminations[:, -1].float().cpu()
+                if infos_list and isinstance(infos_list[-1], dict):
+                    episode_info = infos_list[-1].get("episode")
+                    if isinstance(episode_info, dict) and "success_at_end" in episode_info:
+                        success_at_end = episode_info["success_at_end"]
+                        if isinstance(success_at_end, torch.Tensor):
+                            success = success_at_end.float().cpu()
 
-                    sums[0] += float(chunk_returns.sum().item())
-                    sums[1] += float(chunk_rewards.sum().item())
-                    sums[2] += float(dones.sum().item())
-                    sums[3] += float(success.sum().item())
-                    sums[4] += float(chunk_returns.numel())
-                    sums[5] += float(chunk_rewards.numel())
+                sums[0] += float(chunk_returns.sum().item())
+                sums[1] += float(chunk_rewards.sum().item())
+                sums[2] += float(dones.sum().item())
+                sums[3] += float(success.sum().item())
+                sums[4] += float(chunk_returns.numel())
+                sums[5] += float(chunk_rewards.numel())
 
                 if collect_samples:
-                    profile_collect = (
-                        self._chunk_profiler.profile("collect_samples_pack")
-                        if self._chunk_profiler is not None
-                        else contextlib.nullcontext()
-                    )
-                    if debug_chunk:
-                        self._collect_debug_print(
-                            f"chunk[{rollout_idx},{chunk_idx}] entering collect_samples_pack"
-                        )
-                    t0_collect = time.perf_counter()
-                    with profile_collect:
-                        old_logprobs = _reduce_to_batch(_to_cpu(rollout_result["prev_logprobs"]))
-                        prev_values = _reduce_to_batch(_to_cpu(rollout_result["prev_values"]))
-                        returns = chunk_returns * (1.0 - dones)
+                    old_logprobs = _reduce_to_batch(_to_cpu(rollout_result["prev_logprobs"]))
+                    prev_values = _reduce_to_batch(_to_cpu(rollout_result["prev_values"]))
+                    returns = chunk_returns * (1.0 - dones)
 
-                        sample = RolloutSample(
-                            forward_inputs=self._pack_forward_inputs(rollout_result),
-                            old_logprobs=old_logprobs,
-                            prev_values=prev_values,
-                            returns=returns,
-                        )
-                        samples.append(sample)
-                    if debug_chunk:
-                        self._collect_debug_print(
-                            (
-                                f"chunk[{rollout_idx},{chunk_idx}] collect_samples_pack done "
-                                f"in {(time.perf_counter() - t0_collect):.3f}s"
-                            )
-                        )
+                    sample = RolloutSample(
+                        forward_inputs=self._pack_forward_inputs(rollout_result),
+                        old_logprobs=old_logprobs,
+                        prev_values=prev_values,
+                        returns=returns,
+                    )
+                    samples.append(sample)
 
                 progress_bar.update(1)
-
-                if self._chunk_profiler is not None:
-                    self._chunk_profiler.flush_chunk(
-                        payload={
-                            "mode": mode,
-                            "collect_samples": collect_samples,
-                            "rollout_idx": rollout_idx,
-                            "chunk_idx": chunk_idx,
-                            "chunk_total_s": float(time.perf_counter() - chunk_start),
-                            "num_envs": int(env.num_envs),
-                            "num_action_chunks": int(chunk_actions.shape[1]),
-                        }
-                    )
-                if debug_chunk:
-                    self._collect_debug_print(
-                        (
-                            f"chunk[{rollout_idx},{chunk_idx}] total "
-                            f"{(time.perf_counter() - chunk_start):.3f}s"
-                        )
-                    )
-        finally:
-            progress_bar.close()
 
         sums = self._reduce_sums(sums)
         num_chunks = max(float(sums[4].item()), 1.0)
@@ -992,7 +432,12 @@ class LiberoPPODDPNoRayRunner:
             "num_chunks": float(sums[4].item()),
         }
         if save_video:
-            self._save_eval_videos(frames_by_env, instructions_by_env, video_epoch)
+            self._save_eval_videos(
+                frames_by_env,
+                instructions_by_env,
+                video_epoch,
+                mode=mode,
+            )
         return samples, metrics
 
     def _train_one_epoch(self, samples: list[RolloutSample]) -> dict[str, float]:
@@ -1079,6 +524,15 @@ class LiberoPPODDPNoRayRunner:
         return {f"eval/{k}": v for k, v in eval_metrics.items()}
 
     def run(self) -> None:
+        if self.rank == 0 and self.save_rollout_video:
+            print(
+                (
+                    "[noray][ddp] save_rollout_video is enabled; "
+                    f"training rollout videos will be saved to {self.rollout_video_base_dir}"
+                ),
+                flush=True,
+            )
+
         if self.rank == 0 and self.val_check_interval <= 0 and not self.only_eval:
             print(
                 "[noray][ddp] eval disabled because runner.val_check_interval <= 0",
@@ -1096,79 +550,6 @@ class LiberoPPODDPNoRayRunner:
             dist.destroy_process_group()
             return
 
-        # ####### TEMP START #######
-        temp_rollout_only = os.environ.get("RLINF_TEMP_EXIT_AFTER_FIRST_ROLLOUT", "0") == "1"
-        if temp_rollout_only:
-            temp_num_rollouts = int(os.environ.get("RLINF_TEMP_NUM_ROLLOUTS", "10"))
-            temp_max_steps = int(os.environ.get("RLINF_TEMP_MAX_STEPS", "520"))
-            temp_chunk_steps = max(1, temp_max_steps // int(self.cfg.actor.model.num_action_chunks))
-
-            rollout_env = self.eval_env if self.eval_env is not None else self.env
-            rollout_mode = "eval" if self.eval_env is not None else "train"
-
-            success_rates = []
-            done_rates = []
-            returns = []
-            for rollout_idx in range(temp_num_rollouts):
-                _, rollout_metrics = self._collect_rollouts(
-                    env=rollout_env,
-                    rollout_epoch=1,
-                    chunk_steps=temp_chunk_steps,
-                    mode=rollout_mode,
-                    collect_samples=False,
-                    save_video=True,
-                    video_epoch=rollout_idx,
-                )
-                success_rates.append(float(rollout_metrics["success_rate"]))
-                done_rates.append(float(rollout_metrics["done_rate"]))
-                returns.append(float(rollout_metrics["chunk_return_mean"]))
-
-                if self.rank == 0:
-                    print(
-                        (
-                            f"[TEMP][rollout-only] rollout={rollout_idx + 1}/{temp_num_rollouts} "
-                            f"max_steps={temp_max_steps} "
-                            f"success_rate={rollout_metrics['success_rate']:.4f} "
-                            f"done_rate={rollout_metrics['done_rate']:.4f} "
-                            f"chunk_return_mean={rollout_metrics['chunk_return_mean']:.4f} "
-                            f"num_chunks={rollout_metrics['num_chunks']:.0f}"
-                        ),
-                        flush=True,
-                    )
-
-            if self.rank == 0:
-                overall_success = float(np.mean(success_rates)) if success_rates else 0.0
-                overall_done = float(np.mean(done_rates)) if done_rates else 0.0
-                overall_return = float(np.mean(returns)) if returns else 0.0
-                print(
-                    (
-                        "[TEMP][rollout-only][summary] "
-                        f"num_rollouts={temp_num_rollouts} "
-                        f"max_steps={temp_max_steps} "
-                        f"avg_success_rate={overall_success:.4f} "
-                        f"avg_done_rate={overall_done:.4f} "
-                        f"avg_chunk_return_mean={overall_return:.4f}"
-                    ),
-                    flush=True,
-                )
-                if self.metric_logger is not None:
-                    self.metric_logger.log(
-                        {
-                            "temp/avg_success_rate": overall_success,
-                            "temp/avg_done_rate": overall_done,
-                            "temp/avg_chunk_return_mean": overall_return,
-                            "temp/num_rollouts": float(temp_num_rollouts),
-                            "temp/max_steps": float(temp_max_steps),
-                        },
-                        step=0,
-                    )
-                    self.metric_logger.finish()
-
-            dist.barrier()
-            dist.destroy_process_group()
-            return
-        # ####### TEMP END #######
-
         for epoch in range(self.max_epochs):
             samples, rollout_metrics = self._collect_rollouts(
                 env=self.env,
@@ -1176,42 +557,11 @@ class LiberoPPODDPNoRayRunner:
                 chunk_steps=self.chunk_steps,
                 mode="train",
                 collect_samples=True,
+                save_video=self.save_rollout_video,
+                video_epoch=epoch,
             )
 
-            # ####### TEMP START #######
-            temp_exit_after_first_rollout = os.environ.get(
-                "RLINF_TEMP_EXIT_AFTER_FIRST_ROLLOUT", "0"
-            ) == "1"
-            if temp_exit_after_first_rollout and epoch == 0:
-                if self.rank == 0:
-                    print(
-                        (
-                            "[TEMP][rollout-only] first rollout done: "
-                            f"success_rate={rollout_metrics['success_rate']:.4f}, "
-                            f"done_rate={rollout_metrics['done_rate']:.4f}, "
-                            f"chunk_return_mean={rollout_metrics['chunk_return_mean']:.4f}, "
-                            f"num_chunks={rollout_metrics['num_chunks']:.0f}"
-                        ),
-                        flush=True,
-                    )
-                    if self.metric_logger is not None:
-                        self.metric_logger.log(
-                            {
-                                "temp/rollout_success_rate": rollout_metrics["success_rate"],
-                                "temp/rollout_done_rate": rollout_metrics["done_rate"],
-                                "temp/rollout_chunk_return_mean": rollout_metrics[
-                                    "chunk_return_mean"
-                                ],
-                                "temp/rollout_num_chunks": rollout_metrics["num_chunks"],
-                                "temp/rollout_sample_count": len(samples),
-                            },
-                            step=0,
-                        )
-                        self.metric_logger.finish()
-                dist.barrier()
-                dist.destroy_process_group()
-                return
-            # ####### TEMP END #######
+            print(rollout_metrics)
 
             train_metrics = self._train_one_epoch(samples)
 

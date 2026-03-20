@@ -34,6 +34,10 @@ runner:
   only_eval: False
   val_check_interval: 1
   save_interval: 40
+  save_eval_video: True
+  save_rollout_video: False
+  eval_video_base_dir: ${runner.logger.log_path}/video/eval
+  rollout_video_base_dir: ${runner.logger.log_path}/video/rollout
 
   resume_dir: null
   ckpt_path: null
@@ -108,7 +112,7 @@ env:
     use_fixed_reset_state_ids: True
     is_eval: True
     video_cfg:
-      save_video: True
+      save_eval_video: True
       video_base_dir: ${runner.logger.log_path}/video/eval
 
 rollout:
