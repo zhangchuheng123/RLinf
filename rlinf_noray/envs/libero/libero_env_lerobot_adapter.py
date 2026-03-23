@@ -274,9 +274,6 @@ class LiberoEnv(gym.Env):
         raw_chunk_terminations = torch.stack(raw_chunk_terminations, dim=1)
         raw_chunk_truncations = torch.stack(raw_chunk_truncations, dim=1)
 
-        if torch.any(torch.logical_or(raw_chunk_terminations, raw_chunk_truncations)):
-            import pdb; pdb.set_trace()  # --- IGNORE ---
-
         if self.auto_reset or self.ignore_terminations:
             chunk_terminations = torch.zeros_like(raw_chunk_terminations)
             chunk_truncations = torch.zeros_like(raw_chunk_truncations)
