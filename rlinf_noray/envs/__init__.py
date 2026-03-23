@@ -57,7 +57,7 @@ def get_env_cls(env_type: str, env_cfg=None):
 
             return ManiskillEnv
     elif env_type == SupportedEnvType.LIBERO:
-        from rlinf_noray.envs.libero.libero_env import LiberoEnv
+        from rlinf_noray.envs.libero.libero_env_lerobot_adapter import LiberoEnv
 
         return LiberoEnv
     elif env_type == SupportedEnvType.ROBOTWIN:

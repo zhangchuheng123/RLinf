@@ -288,7 +288,6 @@ class SmolVLAForRLActionPrediction(nn.Module, BasePolicy):
         Returns:
             log_prob: [B] float tensor (summed over chunk and action dims).
         """
-        del timestep
         surrogate = -((norm_actions - noise).float() ** 2).sum(dim=-1)
         return surrogate.float()
 

@@ -18,7 +18,6 @@ from tqdm import tqdm
 import rlinf_noray.algorithms  # noqa: F401
 from rlinf_noray.algorithms.registry import policy_loss
 from rlinf_noray.envs import get_env_cls
-from rlinf_noray.envs.action_utils import prepare_actions
 from rlinf_noray.models import get_model
 from rlinf_noray.utils.metric_logger import MetricLogger
 
@@ -158,9 +157,19 @@ class LiberoPPODDPNoRayRunner:
         self.max_epochs = int(cfg.runner.max_epochs)
         self.rollout_epoch = int(cfg.algorithm.rollout_epoch)
         self.update_epoch = int(cfg.algorithm.update_epoch)
-        self.chunk_steps = int(cfg.env.train.max_steps_per_rollout_epoch) // int(
-            cfg.actor.model.num_action_chunks
+        self.num_execute_steps = int(
+            cfg.runner.get("num_execute_steps", cfg.actor.model.num_action_chunks)
         )
+        if self.num_execute_steps <= 0:
+            raise ValueError(
+                f"runner.num_execute_steps must be > 0, got {self.num_execute_steps}"
+            )
+        if self.num_execute_steps > int(self.model.policy.config.chunk_size):
+            raise ValueError(
+                "runner.num_execute_steps must be <= self.model.policy.config.chunk_size, "
+                f"got {self.num_execute_steps} > {int(self.model.policy.config.chunk_size)}"
+            )
+        self.chunk_steps = int(cfg.env.train.max_steps_per_rollout_epoch) // self.num_execute_steps
         self.metric_logger = MetricLogger(cfg) if self.rank == 0 else None
 
         eval_video_cfg = cfg.env.eval.get("video_cfg", {})
@@ -289,9 +298,7 @@ class LiberoPPODDPNoRayRunner:
         video_epoch: int = 0,
     ) -> tuple[list[RolloutSample], dict[str, float]]:
 
-        align_pickle_path = os.environ.get("RLINF_ROLLOUT_ALIGN_PICKLE_PATH", "").strip()
-        align_data: dict[str, Any] | None = None
-
+        align_pickle_path = os.environ.get("RLINF_ROLLOUT_ALIGN_PICKLE_PATH", "")
         if align_pickle_path:
             align_file = Path(align_pickle_path)
             with open(align_file, "rb") as file:
@@ -322,81 +329,80 @@ class LiberoPPODDPNoRayRunner:
             leave=False,
         )
 
-        for rollout_idx in range(rollout_epoch):
-            for chunk_idx in range(chunk_steps):
+        for _ in range(total_chunks):
+            if mode == "eval":
+                self.ddp_model.module.eval()
 
-                if mode == "eval":
-                    self.ddp_model.module.eval()
+            if align_data is not None:
+                predict_kwargs = {
+                    "external_policy_noise": align_data["policy_noise"],
+                    "observation_before_policy": align_data["observation_before_policy"],
+                    "action_after_policy": align_data["action_after_policy"],
+                    "action_chunk": align_data["action_chunk"],
+                    "action_after_postprocessor": align_data["action_after_postprocessor"],
+                }
+            else:
+                predict_kwargs = {}
 
-                if align_data is not None:
-                    predict_kwargs = {
-                        "external_policy_noise": align_data["policy_noise"],
-                        "observation_before_policy": align_data["observation_before_policy"],
-                        "action_after_policy": align_data["action_after_policy"],
-                        "action_chunk": align_data["action_chunk"],
-                        "action_after_postprocessor": align_data["action_after_postprocessor"],
-                    }
-                else:
-                    predict_kwargs = {}
+            with torch.no_grad():
+                chunk_actions, rollout_result = \
+                    self.ddp_model.module.predict_action_batch(obs, **predict_kwargs)
+            chunk_actions = chunk_actions[:, : self.num_execute_steps]
 
-                with torch.no_grad():
-                    chunk_actions, rollout_result = \
-                        self.ddp_model.module.predict_action_batch(obs, **predict_kwargs)
+            obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = \
+                env.chunk_step(chunk_actions)
+            obs = obs_list[-1]
 
-                obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = \
-                    env.chunk_step(chunk_actions)
-                obs = obs_list[-1]
+            if save_video:
+                for step_idx, step_obs in enumerate(obs_list):
+                    main_images = step_obs["main_images"]
+                    task_descs = step_obs["task_descriptions"]
+                    if main_images is None or task_descs is None:
+                        continue
+                    step_actions = chunk_actions[:, step_idx]
+                    for env_idx in range(env.num_envs):
+                        if not instructions_by_env[env_idx]:
+                            instructions_by_env[env_idx] = str(task_descs[env_idx])
+                        frame = self._render_overlay_frame(
+                            main_image=main_images[env_idx],
+                            action=step_actions[env_idx],
+                        )
+                        frames_by_env[env_idx].append(frame)
 
-                if save_video:
-                    for step_idx, step_obs in enumerate(obs_list):
-                        main_images = step_obs["main_images"]
-                        task_descs = step_obs["task_descriptions"]
-                        if main_images is None or task_descs is None:
-                            continue
-                        step_actions = chunk_actions[:, step_idx]
-                        for env_idx in range(env.num_envs):
-                            if not instructions_by_env[env_idx]:
-                                instructions_by_env[env_idx] = str(task_descs[env_idx])
-                            frame = self._render_overlay_frame(
-                                main_image=main_images[env_idx],
-                                action=step_actions[env_idx],
-                            )
-                            frames_by_env[env_idx].append(frame)
+            chunk_returns = chunk_rewards.sum(dim=1).float().cpu()
+            dones = torch.logical_or(
+                chunk_terminations[:, -1], chunk_truncations[:, -1]
+            ).float().cpu()
 
-                chunk_returns = chunk_rewards.sum(dim=1).float().cpu()
-                dones = torch.logical_or(
-                    chunk_terminations[:, -1], chunk_truncations[:, -1]
-                ).float().cpu()
+            success = chunk_terminations[:, -1].float().cpu()
+            if infos_list and isinstance(infos_list[-1], dict):
+                episode_info = infos_list[-1].get("episode")
+                if isinstance(episode_info, dict) and "success_at_end" in episode_info:
+                    success_at_end = episode_info["success_at_end"]
+                    if isinstance(success_at_end, torch.Tensor):
+                        success = success_at_end.float().cpu()
 
-                success = chunk_terminations[:, -1].float().cpu()
-                if infos_list and isinstance(infos_list[-1], dict):
-                    episode_info = infos_list[-1].get("episode")
-                    if isinstance(episode_info, dict) and "success_at_end" in episode_info:
-                        success_at_end = episode_info["success_at_end"]
-                        if isinstance(success_at_end, torch.Tensor):
-                            success = success_at_end.float().cpu()
+            sums[0] += float(chunk_returns.sum().item())
+            sums[1] += float(chunk_rewards.sum().item())
+            sums[2] += float(dones.sum().item())
+            sums[3] += float(success.sum().item())
+            sums[4] += float(chunk_returns.numel())
+            sums[5] += float(chunk_rewards.numel())
 
-                sums[0] += float(chunk_returns.sum().item())
-                sums[1] += float(chunk_rewards.sum().item())
-                sums[2] += float(dones.sum().item())
-                sums[3] += float(success.sum().item())
-                sums[4] += float(chunk_returns.numel())
-                sums[5] += float(chunk_rewards.numel())
+            if collect_samples:
+                old_logprobs = _reduce_to_batch(_to_cpu(rollout_result["prev_logprobs"]))
+                prev_values = _reduce_to_batch(_to_cpu(rollout_result["prev_values"]))
+                returns = chunk_returns * (1.0 - dones)
 
-                if collect_samples:
-                    old_logprobs = _reduce_to_batch(_to_cpu(rollout_result["prev_logprobs"]))
-                    prev_values = _reduce_to_batch(_to_cpu(rollout_result["prev_values"]))
-                    returns = chunk_returns * (1.0 - dones)
+                sample = RolloutSample(
+                    forward_inputs=self._pack_forward_inputs(rollout_result),
+                    old_logprobs=old_logprobs,
+                    prev_values=prev_values,
+                    returns=returns,
+                )
+                samples.append(sample)
 
-                    sample = RolloutSample(
-                        forward_inputs=self._pack_forward_inputs(rollout_result),
-                        old_logprobs=old_logprobs,
-                        prev_values=prev_values,
-                        returns=returns,
-                    )
-                    samples.append(sample)
-
-                progress_bar.update(1)
+            progress_bar.update(1)
 
         sums = self._reduce_sums(sums)
         num_chunks = max(float(sums[4].item()), 1.0)
@@ -539,6 +545,7 @@ class LiberoPPODDPNoRayRunner:
             )
 
             print(rollout_metrics)
+            raise SystemExit("Debug exit after first rollout collection")
 
             train_metrics = self._train_one_epoch(samples)
 

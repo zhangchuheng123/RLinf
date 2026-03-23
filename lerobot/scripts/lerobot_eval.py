@@ -181,6 +181,8 @@ def rollout(
         "observation_from_env": deepcopy(observation)
     }
 
+    import pdb; pdb.set_trace()
+
     def _to_cpu_debug(obj: Any):
         if isinstance(obj, torch.Tensor):
             return obj.detach().cpu()

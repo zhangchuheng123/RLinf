@@ -170,3 +170,24 @@ B）_collect_rollouts 部分： DISABLE_WANDB=1 SAVE_ROLLOUT_VIDEO=true bash exa
 RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" PYTHONPATH=. MUJOCO_GL=egl PYOPENGL_PLATFORM=egl TOKENIZERS_PARALLELISM=false uv run --no-sync python -m lerobot.scripts.lerobot_eval --policy.path=models/smolvla_libero --env.type=libero --env.task=libero_10 --eval.batch_size=2 --eval.n_episodes=2 --policy.use_amp=false --policy.device=cuda --inference_precision=bf16 
 
 RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" DISABLE_WANDB=1 SAVE_ROLLOUT_VIDEO=true bash examples/embodiment/run_libero_ppo_smolvla_noray.sh
+
+# Q14
+
+请调整 noray 代码，对齐如下两个链路：
+
+1）noray 链路：
+- rlinf_noray/envs/libero/libero_env_lerobot_adapter.py : overwrite observation = align_data["observation_from_env"] from dumped data
+- rlinf_noray/envs/libero/libero_env_lerobot_adapter.py predict_action_batch 
+- rlinf_noray/models/embodiment/smolvla/smolvla_policy_lerobot_aligned.py _preprocess_obs_batch
+
+2) lerobot 链路：
+- lerobot/scripts/lerobot_eval.py : after env.reset() dumps observation_from_env 
+- preprocess_observation
+- add_envs_task
+- env_preprocessor
+- preprocessor
+- observation.state related
+
+使得，如下命令中的 assert torch.all_close(batch_obs_align['observation.state'], batch_obs['observation.state']) 检查能通过。
+
+RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" DISABLE_WANDB=1 SAVE_ROLLOUT_VIDEO=true bash examples/embodiment/run_libero_ppo_smolvla_noray.sh

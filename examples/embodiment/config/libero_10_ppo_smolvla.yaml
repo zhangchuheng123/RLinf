@@ -36,6 +36,7 @@ runner:
   save_interval: 40
   save_eval_video: True
   save_rollout_video: False
+  num_execute_steps: ${actor.model.num_action_chunks}
   eval_video_base_dir: ${runner.logger.log_path}/video/eval
   rollout_video_base_dir: ${runner.logger.log_path}/video/rollout
 

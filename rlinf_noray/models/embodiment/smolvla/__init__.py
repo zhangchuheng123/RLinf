@@ -22,7 +22,7 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
         SmolVLMWithExpertModel,
     )
 
-    from rlinf_noray.models.embodiment.smolvla.smolvla_policy import (
+    from rlinf_noray.models.embodiment.smolvla.smolvla_policy_lerobot_aligned import (
         SmolVLAForRLActionPrediction,
     )
 

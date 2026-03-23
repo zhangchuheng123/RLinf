@@ -321,7 +321,9 @@ class LiberoEnv(gym.Env):
             env_fn_params = self.get_env_fn_params(reconfig_env_idx)
             self.env.reconfigure_env_fns(env_fn_params, reconfig_env_idx)
         self.env.seed(self.seed * len(env_idx))
-        self.env.reset(id=env_idx)
+        # TODO: Call LIBERO native reset via ReconfigureSubprocEnv.
+        reset_res = self.env.reset(id=env_idx)
+
         init_state = self._get_reset_states(env_idx=env_idx)
         self.env.set_init_state(init_state=init_state, id=env_idx)
 
@@ -330,6 +332,7 @@ class LiberoEnv(gym.Env):
         env_idx: Optional[Union[int, list[int], np.ndarray]] = None,
         reset_state_ids=None,
     ):
+
         if env_idx is None:
             env_idx = np.arange(self.num_envs)
 
@@ -348,6 +351,7 @@ class LiberoEnv(gym.Env):
             zero_actions = np.zeros((len(env_idx), 7))
             if self.cfg.reset_gripper_open:
                 zero_actions[:, -1] = -1
+            # TODO: Call LIBERO native step via ReconfigureSubprocEnv.
             raw_obs, _, _, _ = self.env.step(zero_actions, env_idx)
         if self.current_raw_obs is None:
             self.current_raw_obs = [None] * self.num_envs
@@ -365,6 +369,7 @@ class LiberoEnv(gym.Env):
             actions = actions.detach().cpu().float().numpy()
 
         self._elapsed_steps += 1
+        # TODO: Call LIBERO native step via ReconfigureSubprocEnv.
         raw_obs, _reward, terminations, info_lists = self.env.step(actions)
         self.current_raw_obs = raw_obs
         infos = list_of_dict_to_dict_of_list(info_lists)
