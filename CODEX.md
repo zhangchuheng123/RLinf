@@ -191,3 +191,7 @@ RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" D
 使得，如下命令中的 assert torch.all_close(batch_obs_align['observation.state'], batch_obs['observation.state']) 检查能通过。
 
 RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" DISABLE_WANDB=1 SAVE_ROLLOUT_VIDEO=true bash examples/embodiment/run_libero_ppo_smolvla_noray.sh
+
+# Q15
+
+我们现在需要来考虑 reset 相关的问题，目前 lerobot/envs/libero.py 中的 step 和 .venv/lib/python3.11/site-packages/gymnasium/vector/sync_vector_env.py 中的 step 都包含了 autoreset 逻辑。但是这其实不是我们想要的。我们希望的表现是，

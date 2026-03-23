@@ -169,6 +169,7 @@ class LiberoPPODDPNoRayRunner:
                 "runner.num_execute_steps must be <= self.model.policy.config.chunk_size, "
                 f"got {self.num_execute_steps} > {int(self.model.policy.config.chunk_size)}"
             )
+        print(f"Using num_execute_steps={self.num_execute_steps} out of model's chunk_size={int(self.model.policy.config.chunk_size)}")
         self.chunk_steps = int(cfg.env.train.max_steps_per_rollout_epoch) // self.num_execute_steps
         self.metric_logger = MetricLogger(cfg) if self.rank == 0 else None
 
@@ -333,7 +334,7 @@ class LiberoPPODDPNoRayRunner:
             if mode == "eval":
                 self.ddp_model.module.eval()
 
-            if align_data is not None:
+            if align_pickle_path:
                 predict_kwargs = {
                     "external_policy_noise": align_data["policy_noise"],
                     "observation_before_policy": align_data["observation_before_policy"],
@@ -347,7 +348,7 @@ class LiberoPPODDPNoRayRunner:
             with torch.no_grad():
                 chunk_actions, rollout_result = \
                     self.ddp_model.module.predict_action_batch(obs, **predict_kwargs)
-            chunk_actions = chunk_actions[:, : self.num_execute_steps]
+            chunk_actions = chunk_actions[:, :self.num_execute_steps]
 
             obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = \
                 env.chunk_step(chunk_actions)
@@ -373,14 +374,7 @@ class LiberoPPODDPNoRayRunner:
             dones = torch.logical_or(
                 chunk_terminations[:, -1], chunk_truncations[:, -1]
             ).float().cpu()
-
             success = chunk_terminations[:, -1].float().cpu()
-            if infos_list and isinstance(infos_list[-1], dict):
-                episode_info = infos_list[-1].get("episode")
-                if isinstance(episode_info, dict) and "success_at_end" in episode_info:
-                    success_at_end = episode_info["success_at_end"]
-                    if isinstance(success_at_end, torch.Tensor):
-                        success = success_at_end.float().cpu()
 
             sums[0] += float(chunk_returns.sum().item())
             sums[1] += float(chunk_rewards.sum().item())
@@ -545,7 +539,8 @@ class LiberoPPODDPNoRayRunner:
             )
 
             print(rollout_metrics)
-            raise SystemExit("Debug exit after first rollout collection")
+
+            import pdb; pdb.set_trace()  # --- IGNORE ---
 
             train_metrics = self._train_one_epoch(samples)
 

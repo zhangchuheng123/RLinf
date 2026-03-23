@@ -5,9 +5,15 @@ from pathlib import Path
 import pickle
 import os
 
+from copy import deepcopy
 import gymnasium as gym
 import numpy as np
 import torch
+
+from gymnasium.vector.utils import (
+    concatenate,
+    iterate,
+)
 
 from rlinf_noray.integrations.lerobot_local_import import ensure_local_lerobot
 from rlinf_noray.envs.utils import list_of_dict_to_dict_of_list, to_tensor
@@ -87,6 +93,8 @@ class LiberoEnv(gym.Env):
         self.env = env_map[str(cfg.task_suite_name)][selected_task_id]
         self.task_ids = np.full((self.num_envs,), selected_task_id, dtype=np.int32)
 
+        # TODO: current version only support single task id per env instance, need to extend to support multiple task ids in the future
+
     @property
     def elapsed_steps(self):
         return self._elapsed_steps
@@ -142,13 +150,68 @@ class LiberoEnv(gym.Env):
 
         return self._convert_observation(observation), {}
 
-    def step(self, actions=None, auto_reset=True):
-        del auto_reset
+    def gym_step(self, actions, is_skip):
+        """Steps through each of the environments returning the batched results.
+        copying from .venv/lib/python3.11/site-packages/gymnasium/vector/sync_vector_env.py 
+        removing reset logic
+
+        Returns:
+            The batched environment step results
+        """
+
+        actions = iterate(self.env.action_space, actions)
+
+        def _slice_obs(obs, env_idx):
+            if isinstance(obs, dict):
+                return {key: _slice_obs(value, env_idx) for key, value in obs.items()}
+            if isinstance(obs, tuple):
+                return tuple(_slice_obs(value, env_idx) for value in obs)
+            return obs[env_idx]
+
+        observations, infos = [], {}
+        for i, action in enumerate(actions):
+            if is_skip[i]:
+                env_obs = _slice_obs(self.env._observations, i)
+                self.env._rewards[i] = 0.0
+                self.env._terminations[i] = False
+                self.env._truncations[i] = False
+                env_info = {}
+            else:
+                (
+                    env_obs,
+                    self.env._rewards[i],
+                    self.env._terminations[i],
+                    self.env._truncations[i],
+                    env_info,
+                ) = self.env.envs[i].step(action)
+
+            observations.append(env_obs)
+            infos = self.env._add_info(infos, env_info, i)
+
+        # Concatenate the observations
+        self.env._observations = concatenate(self.env.single_observation_space, observations, self.env._observations)
+
+        return (
+            deepcopy(self.env._observations),
+            np.copy(self.env._rewards),
+            np.copy(self.env._terminations),
+            np.copy(self.env._truncations),
+            infos,
+        )
+    
+    def step(self, actions=None, is_skip=None):
+
         if isinstance(actions, torch.Tensor):
             actions = actions.detach().cpu().float().numpy()
 
-        observation, reward, terminations, truncations, infos = self.env.step(actions)
-        self._elapsed_steps += 1
+        if is_skip is None:
+            is_skip = np.zeros((self.num_envs,), dtype=bool)
+        else:
+            if isinstance(is_skip, torch.Tensor):
+                is_skip = is_skip.detach().cpu().numpy()
+
+        observation, reward, terminations, truncations, infos = self.gym_step(actions, is_skip)
+        self._elapsed_steps[~is_skip] += 1
 
         infos_dict = dict(infos) if isinstance(infos, dict) else {}
         if self.ignore_terminations:
@@ -188,19 +251,18 @@ class LiberoEnv(gym.Env):
 
         for step_index in range(chunk_size):
             actions = chunk_actions[:, step_index]
-            obs, step_reward, terminations, truncations, infos = self.step(actions, auto_reset=False)
 
-            if done_in_chunk.any():
-                step_reward = step_reward.clone()
-                terminations = terminations.clone()
-                truncations = truncations.clone()
-                step_reward[done_in_chunk] = 0
-                terminations[done_in_chunk] = False
-                truncations[done_in_chunk] = False
+            obs, step_reward, terminations, truncations, infos = self.step(actions, is_skip=done_in_chunk)
 
-            newly_done = torch.logical_and(torch.logical_or(terminations, truncations), ~done_in_chunk)
-            if newly_done.any():
-                done_in_chunk = torch.logical_or(done_in_chunk, newly_done)
+            # if done_in_chunk.any():
+            #     step_reward = step_reward.clone()
+            #     terminations = terminations.clone()
+            #     truncations = truncations.clone()
+            #     step_reward[done_in_chunk] = 0
+            #     terminations[done_in_chunk] = False
+            #     truncations[done_in_chunk] = False
+
+            done_in_chunk = torch.logical_or(torch.logical_or(terminations, truncations), done_in_chunk)
 
             obs_list.append(obs)
             infos_list.append(infos)
@@ -211,6 +273,9 @@ class LiberoEnv(gym.Env):
         chunk_rewards = torch.stack(chunk_rewards, dim=1)
         raw_chunk_terminations = torch.stack(raw_chunk_terminations, dim=1)
         raw_chunk_truncations = torch.stack(raw_chunk_truncations, dim=1)
+
+        if torch.any(torch.logical_or(raw_chunk_terminations, raw_chunk_truncations)):
+            import pdb; pdb.set_trace()  # --- IGNORE ---
 
         if self.auto_reset or self.ignore_terminations:
             chunk_terminations = torch.zeros_like(raw_chunk_terminations)

@@ -328,25 +328,25 @@ class LiberoEnv(gym.Env):
         raw_obs, reward, done, info = self._env.step(action)
 
         is_success = self._env.check_success()
-        terminated = done or is_success
-        info.update(
-            {
-                "task": self.task,
-                "task_id": self.task_id,
-                "done": done,
-                "is_success": is_success,
-            }
-        )
+        truncated = np.bool(self._env.env.timestep >= self._max_episode_steps)
+        terminated = done or is_success or truncated
+
+        info.update({
+            "task": self.task,
+            "task_id": self.task_id,
+            "done": done,
+            "is_success": is_success,
+        })
         observation = self._format_raw_obs(raw_obs)
+
         if terminated:
-            info["final_info"] = {
-                "task": self.task,
-                "task_id": self.task_id,
-                "done": bool(done),
-                "is_success": bool(is_success),
-            }
-            self.reset()
-        truncated = False
+            # Reset environment immediately and return the new observation and info
+            # .step() on terminated libero environment can result in error
+            # import pdb; pdb.set_trace()
+            reset_observation, reset_info = self.reset()
+            observation = reset_observation
+            info = reset_info
+
         return observation, reward, terminated, truncated, info
 
     def close(self):
