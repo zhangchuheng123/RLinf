@@ -189,6 +189,7 @@ class LiberoPPODDPNoRayRunner:
         self.rollout_video_base_dir = str(
             cfg.runner.get("rollout_video_base_dir", default_rollout_video_base_dir)
         )
+        self._video_traj_counter = self.rank * 1_000_000
 
     @staticmethod
     def _to_uint8_hwc(img: Any) -> np.ndarray:
@@ -213,8 +214,14 @@ class LiberoPPODDPNoRayRunner:
         return arr
 
     @staticmethod
+    def _to_bool(value: Any) -> bool:
+        if isinstance(value, torch.Tensor):
+            return bool(value.detach().cpu().item())
+        return bool(value)
+
+    @staticmethod
     def _render_overlay_frame(main_image: Any, action: Any) -> np.ndarray:
-        frame = LiberoPPODDPNoRayRunner._to_uint8_hwc(main_image)
+        frame = np.flipud(LiberoPPODDPNoRayRunner._to_uint8_hwc(main_image)).copy()
         pil = Image.fromarray(frame)
         draw = ImageDraw.Draw(pil)
         font = ImageFont.load_default()
@@ -236,29 +243,83 @@ class LiberoPPODDPNoRayRunner:
         slug = "_".join(part for part in slug.split("_") if part)
         return (slug or "task")[:80]
 
-    def _save_eval_videos(
+    def _init_video_buffers(self, num_envs: int) -> dict[str, Any]:
+        return {
+            "frames_by_env": [[] for _ in range(num_envs)],
+            "instructions_by_env": ["" for _ in range(num_envs)],
+        }
+
+    def _next_video_traj_id(self) -> int:
+        traj_id = int(self._video_traj_counter)
+        self._video_traj_counter += 1
+        return traj_id
+
+    def _save_single_video(
         self,
-        frames_by_env: list[list[np.ndarray]],
-        instructions_by_env: list[str],
-        epoch: int,
-        mode: str = "eval",
+        frames: list[np.ndarray],
+        instruction: str,
+        success: bool,
+        mode: str,
     ) -> None:
         base_dir_str = (
             self.eval_video_base_dir if mode == "eval" else self.rollout_video_base_dir
         )
-        if not base_dir_str:
+        if not base_dir_str or not frames:
             return
+
         base_dir = Path(base_dir_str)
         base_dir.mkdir(parents=True, exist_ok=True)
 
-        traj_offset = self.rank * len(frames_by_env)
-        for local_idx, frames in enumerate(frames_by_env):
-            if not frames:
+        traj_id = self._next_video_traj_id()
+        instruction_slug = self._instruction_to_slug(instruction)
+        status = "success" if success else "fail"
+        out_path = base_dir / f"traj_{traj_id:04d}_{instruction_slug}_{status}.mp4"
+        imageio.mimsave(str(out_path), frames, fps=15)
+
+    def _append_and_maybe_flush_videos(
+        self,
+        video_buffers: dict[str, Any],
+        obs_list: list[dict[str, Any]],
+        chunk_actions: torch.Tensor,
+        chunk_terminations: torch.Tensor,
+        chunk_truncations: torch.Tensor,
+        mode: str,
+    ) -> None:
+        frames_by_env: list[list[np.ndarray]] = video_buffers["frames_by_env"]
+        instructions_by_env: list[str] = video_buffers["instructions_by_env"]
+
+        for step_idx, step_obs in enumerate(obs_list):
+            main_images = step_obs.get("main_images")
+            task_descs = step_obs.get("task_descriptions")
+            if main_images is None or task_descs is None:
                 continue
-            traj_idx = traj_offset + local_idx
-            instruction_slug = self._instruction_to_slug(instructions_by_env[local_idx])
-            out_path = base_dir / f"{mode}_epoch_{epoch}_traj_{traj_idx:02d}_{instruction_slug}.mp4"
-            imageio.mimsave(str(out_path), frames, fps=15)
+
+            step_actions = chunk_actions[:, step_idx]
+            for env_idx in range(len(frames_by_env)):
+                if not instructions_by_env[env_idx]:
+                    instructions_by_env[env_idx] = str(task_descs[env_idx])
+
+                frame = self._render_overlay_frame(
+                    main_image=main_images[env_idx],
+                    action=step_actions[env_idx],
+                )
+                frames_by_env[env_idx].append(frame)
+
+                terminated = self._to_bool(chunk_terminations[env_idx, step_idx])
+                truncated = self._to_bool(chunk_truncations[env_idx, step_idx])
+                if terminated or truncated:
+                    is_success = terminated and (not truncated)
+                    print(
+                        f"[noray][ddp] Flushing video for env_idx={env_idx} terminated={terminated} truncated={truncated}",
+                    )
+                    self._save_single_video(
+                        frames=frames_by_env[env_idx],
+                        instruction=instructions_by_env[env_idx],
+                        success=is_success,
+                        mode=mode,
+                    )
+                    frames_by_env[env_idx].clear()
+                    instructions_by_env[env_idx] = ""
 
     def _reduce_sums(self, sums: torch.Tensor) -> torch.Tensor:
         sums = sums.to(self.device, dtype=torch.float64)
@@ -296,14 +357,7 @@ class LiberoPPODDPNoRayRunner:
         mode: str,
         collect_samples: bool,
         save_video: bool = False,
-        video_epoch: int = 0,
     ) -> tuple[list[RolloutSample], dict[str, float]]:
-
-        align_pickle_path = os.environ.get("RLINF_ROLLOUT_ALIGN_PICKLE_PATH", "")
-        if align_pickle_path:
-            align_file = Path(align_pickle_path)
-            with open(align_file, "rb") as file:
-                align_data = pickle.load(file)
 
         obs, _ = env.reset()
         # obs: dict of 
@@ -313,14 +367,12 @@ class LiberoPPODDPNoRayRunner:
         #   "states": (num_envs, state_dim) float32
 
         samples: list[RolloutSample] = []
-        frames_by_env: list[list[np.ndarray]] = []
-        instructions_by_env: list[str] = []
+        video_buffers: dict[str, Any] | None = None
         if save_video:
-            frames_by_env = [[] for _ in range(env.num_envs)]
-            instructions_by_env = ["" for _ in range(env.num_envs)]
+            video_buffers = self._init_video_buffers(env.num_envs)
 
-        sums = torch.zeros(6, dtype=torch.float64)
-        # [sum_chunk_return, sum_step_reward, done_count, success_count, num_chunks, num_steps]
+        sums = torch.zeros(4, dtype=torch.float64)
+        # [Return sum, Step count, Done count, Success count]
 
         total_chunks = rollout_epoch * chunk_steps
         progress_bar = tqdm(
@@ -334,54 +386,37 @@ class LiberoPPODDPNoRayRunner:
             if mode == "eval":
                 self.ddp_model.module.eval()
 
-            if align_pickle_path:
-                predict_kwargs = {
-                    "external_policy_noise": align_data["policy_noise"],
-                    "observation_before_policy": align_data["observation_before_policy"],
-                    "action_after_policy": align_data["action_after_policy"],
-                    "action_chunk": align_data["action_chunk"],
-                    "action_after_postprocessor": align_data["action_after_postprocessor"],
-                }
-            else:
-                predict_kwargs = {}
-
             with torch.no_grad():
                 chunk_actions, rollout_result = \
-                    self.ddp_model.module.predict_action_batch(obs, **predict_kwargs)
+                    self.ddp_model.module.predict_action_batch(obs)
             chunk_actions = chunk_actions[:, :self.num_execute_steps]
 
             obs_list, chunk_rewards, chunk_terminations, chunk_truncations, infos_list = \
                 env.chunk_step(chunk_actions)
             obs = obs_list[-1]
 
-            if save_video:
-                for step_idx, step_obs in enumerate(obs_list):
-                    main_images = step_obs["main_images"]
-                    task_descs = step_obs["task_descriptions"]
-                    if main_images is None or task_descs is None:
-                        continue
-                    step_actions = chunk_actions[:, step_idx]
-                    for env_idx in range(env.num_envs):
-                        if not instructions_by_env[env_idx]:
-                            instructions_by_env[env_idx] = str(task_descs[env_idx])
-                        frame = self._render_overlay_frame(
-                            main_image=main_images[env_idx],
-                            action=step_actions[env_idx],
-                        )
-                        frames_by_env[env_idx].append(frame)
+            if save_video and video_buffers is not None:
+                self._append_and_maybe_flush_videos(
+                    video_buffers=video_buffers,
+                    obs_list=obs_list,
+                    chunk_actions=chunk_actions,
+                    chunk_terminations=chunk_terminations,
+                    chunk_truncations=chunk_truncations,
+                    mode=mode,
+                )
 
             chunk_returns = chunk_rewards.sum(dim=1).float().cpu()
-            dones = torch.logical_or(
-                chunk_terminations[:, -1], chunk_truncations[:, -1]
-            ).float().cpu()
-            success = chunk_terminations[:, -1].float().cpu()
+            # chunk_returns: (num_envs, ) float32
+            dones = torch.logical_or(chunk_terminations, chunk_truncations).any(dim=1).float().cpu()
+            # dones: (num_envs, ) float32
+            success = torch.logical_and(chunk_terminations, torch.logical_not(chunk_truncations)).any(dim=1).float().cpu()
+            # success: (num_envs, ) float32
+            # TODO: There is a risk when an agent completes the task within the chunk
 
-            sums[0] += float(chunk_returns.sum().item())
-            sums[1] += float(chunk_rewards.sum().item())
-            sums[2] += float(dones.sum().item())
-            sums[3] += float(success.sum().item())
-            sums[4] += float(chunk_returns.numel())
-            sums[5] += float(chunk_rewards.numel())
+            sums[0] += float(chunk_returns.sum().item())        # Return
+            sums[1] += float(chunk_rewards.numel())             # Length
+            sums[2] += float(dones.sum().item())                # Num of trajs  
+            sums[3] += float(success.sum().item())              # Num of success trajs
 
             if collect_samples:
                 old_logprobs = _reduce_to_batch(_to_cpu(rollout_result["prev_logprobs"]))
@@ -399,22 +434,12 @@ class LiberoPPODDPNoRayRunner:
             progress_bar.update(1)
 
         sums = self._reduce_sums(sums)
-        num_chunks = max(float(sums[4].item()), 1.0)
-        num_steps = max(float(sums[5].item()), 1.0)
         metrics = {
-            "chunk_return_mean": float(sums[0].item() / num_chunks),
-            "step_reward_mean": float(sums[1].item() / num_steps),
-            "done_rate": float(sums[2].item() / num_chunks),
-            "success_rate": float(sums[3].item() / num_chunks),
-            "num_chunks": float(sums[4].item()),
+            "return_per_step": float(sums[0].item() / sums[1].item()) if sums[1].item() > 0 else 0.0,
+            "return_per_traj_running": float(sums[0].item() / sums[2].item()) if sums[2].item() > 0 else 0.0,
+            "average_length_running": float(sums[1].item() / sums[2].item()) if sums[2].item() > 0 else 0.0,
+            "success_rate": float(sums[3].item() / sums[2].item()) if sums[2].item() > 0 else 0.0,
         }
-        if save_video:
-            self._save_eval_videos(
-                frames_by_env,
-                instructions_by_env,
-                video_epoch,
-                mode=mode,
-            )
         return samples, metrics
 
     def _train_one_epoch(self, samples: list[RolloutSample]) -> dict[str, float]:
@@ -495,7 +520,6 @@ class LiberoPPODDPNoRayRunner:
                 mode="eval",
                 collect_samples=False,
                 save_video=self.save_eval_video,
-                video_epoch=epoch,
             )
         self.ddp_model.module.train()
         return {f"eval/{k}": v for k, v in eval_metrics.items()}
@@ -535,7 +559,6 @@ class LiberoPPODDPNoRayRunner:
                 mode="train",
                 collect_samples=True,
                 save_video=self.save_rollout_video,
-                video_epoch=epoch,
             )
 
             print(rollout_metrics)

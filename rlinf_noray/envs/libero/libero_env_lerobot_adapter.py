@@ -231,57 +231,31 @@ class LiberoEnv(gym.Env):
         )
 
     def chunk_step(self, chunk_actions):
+
         chunk_size = int(chunk_actions.shape[1])
         obs_list = []
         infos_list = []
         chunk_rewards = []
-        raw_chunk_terminations = []
-        raw_chunk_truncations = []
+        chunk_terminations = []
+        chunk_truncations = []
 
         done_in_chunk = torch.zeros(self.num_envs, dtype=torch.bool)
-
-        align_pickle_path = os.environ.get("RLINF_ROLLOUT_ALIGN_PICKLE_PATH", "")
-        if align_pickle_path:
-            align_file = Path(align_pickle_path)
-            with open(align_file, "rb") as file:
-                align_data = pickle.load(file)
-
-            assert torch.allclose(chunk_actions[:, 0], torch.tensor(align_data['action_after_postprocessor']))
-            print("Passed consistency check for first action in chunk with align data")
 
         for step_index in range(chunk_size):
             actions = chunk_actions[:, step_index]
 
             obs, step_reward, terminations, truncations, infos = self.step(actions, is_skip=done_in_chunk)
-
-            # if done_in_chunk.any():
-            #     step_reward = step_reward.clone()
-            #     terminations = terminations.clone()
-            #     truncations = truncations.clone()
-            #     step_reward[done_in_chunk] = 0
-            #     terminations[done_in_chunk] = False
-            #     truncations[done_in_chunk] = False
-
             done_in_chunk = torch.logical_or(torch.logical_or(terminations, truncations), done_in_chunk)
 
             obs_list.append(obs)
             infos_list.append(infos)
             chunk_rewards.append(step_reward)
-            raw_chunk_terminations.append(terminations)
-            raw_chunk_truncations.append(truncations)
+            chunk_terminations.append(terminations)
+            chunk_truncations.append(truncations)
 
         chunk_rewards = torch.stack(chunk_rewards, dim=1)
-        raw_chunk_terminations = torch.stack(raw_chunk_terminations, dim=1)
-        raw_chunk_truncations = torch.stack(raw_chunk_truncations, dim=1)
-
-        if self.auto_reset or self.ignore_terminations:
-            chunk_terminations = torch.zeros_like(raw_chunk_terminations)
-            chunk_truncations = torch.zeros_like(raw_chunk_truncations)
-            chunk_terminations[:, -1] = raw_chunk_terminations.any(dim=1)
-            chunk_truncations[:, -1] = raw_chunk_truncations.any(dim=1)
-        else:
-            chunk_terminations = raw_chunk_terminations
-            chunk_truncations = raw_chunk_truncations
+        chunk_terminations = torch.stack(chunk_terminations, dim=1)
+        chunk_truncations = torch.stack(chunk_truncations, dim=1)
 
         return (
             obs_list,

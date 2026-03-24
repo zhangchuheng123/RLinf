@@ -67,25 +67,7 @@ class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
             dtype=policy_dtype,
         )
 
-        if "observation_before_policy" in kwargs:
-            batch_obs_align = kwargs["observation_before_policy"]
-
-            # check batch_obs_align and batch_obs are consistent (e.g. same keys, same values for shared keys)
-            # ['action', 'next.reward', 'next.done', 'next.truncated', 'info', 'task', 'observation.images.image', 
-            # 'observation.images.image2', 'observation.state', 'observation.language.tokens', 'observation.language.attention_mask']
-            assert batch_obs_align['action'] is None and batch_obs['action'] is None
-            assert batch_obs_align['next.reward'] == batch_obs['next.reward']
-            assert batch_obs_align['next.done'] == batch_obs['next.done']
-            assert batch_obs_align['next.truncated'] == batch_obs['next.truncated']
-            assert batch_obs_align['task'] == batch_obs['task']
-            assert torch.allclose(batch_obs_align['observation.images.image'], batch_obs['observation.images.image'])
-            assert torch.allclose(batch_obs_align['observation.images.image2'], batch_obs['observation.images.image2'])
-            assert torch.allclose(batch_obs_align['observation.state'], batch_obs['observation.state'])
-            assert torch.allclose(batch_obs_align['observation.language.tokens'], batch_obs['observation.language.tokens'])
-            assert torch.allclose(batch_obs_align['observation.language.attention_mask'], batch_obs['observation.language.attention_mask'])
-
-            print("Passed consistency check between batch_obs_align and batch_obs for shared keys")
-
+        if "external_policy_noise" in kwargs:
             policy_noise = kwargs["external_policy_noise"]
 
         action_norm, action_chunk = self.policy.select_action(
@@ -93,14 +75,6 @@ class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
             noise=policy_noise,
             return_chunk=True,
         )
-
-        if 'action_chunk' in kwargs:
-            assert torch.allclose(action_chunk, kwargs['action_chunk'])
-            print("Passed consistency check for action_chunk")
-
-        if 'action_after_policy' in kwargs:
-            assert torch.allclose(action_norm, kwargs['action_after_policy'])
-            print("Passed consistency check for action after policy")
 
         action_raw = run_lerobot_action_postprocess(
             action=action_chunk,
