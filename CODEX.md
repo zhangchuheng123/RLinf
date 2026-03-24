@@ -194,4 +194,77 @@ RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" D
 
 # Q15
 
-我们现在需要来考虑 reset 相关的问题，目前 lerobot/envs/libero.py 中的 step 和 .venv/lib/python3.11/site-packages/gymnasium/vector/sync_vector_env.py 中的 step 都包含了 autoreset 逻辑。但是这其实不是我们想要的。我们希望的表现是，
+我们现在需要来考虑 reset 相关的问题，目前 lerobot/envs/libero.py 中的 step 和 .venv/lib/python3.11/site-packages/gymnasium/vector/sync_vector_env.py 中的 step 都包含了 autoreset 逻辑。但是这其实不是我们想要的。我们希望不要重复 reset。
+
+
+# Q16
+
+请创建新的 examples/embodiment/run_libero_dsrl_smolvla_noray.sh 脚本以及相应的代码文件，用以实现 DSRL（具体信息见下）。
+
+注意：
+- 请尽量在现在 ppo 的代码基础上进行，尽量遵循原框架。为了避免损害已有代码，可以把代码进行复制后再更改；
+- 请用尽量少的修改完成任务，不要通过设置默认值和各种兜底来掩盖预期外的错误，有错误请让它及时抛出；
+- 调试中请禁用 wandb
+
+```markdown
+# DSRL-Style 实现要点 (SMOLVLA + RLINF)
+
+## 1. 核心思想
+
+- 不优化原始 action space，而是在 latent noise space w 训练策略 π^w(s)
+- 预训练的 SmolVLA (π_θ) 完全冻结，作为黑盒生成器
+- 给定 (s, w)，π_θ 生成完整 action chunk A = [a_1, ..., a_T]
+- 实际只执行前 K 个动作 A[:K]
+
+## 2. 网络架构
+
+- pi_w (Actor): 输入观测 s，输出高斯分布 (μ, σ) 的噪声空间策略
+- Q_w (Critic): 输入 (s, w)，输出 Q 值
+- V_w (Value): 输入 s，输出状态价值（用于 GAE）
+
+以上的 s 输入可以复用 SmolVLA ，提取其中的 hidden 作为网络输入，比如用最后一层最后一个 token 的 hidden
+
+## 3. 数据采集
+
+- w ~ π_w(s)
+- A = π_θ(s, w) 生成完整 chunk
+- A_exec = A[:K] 执行
+- 存储 (s, w, A, r, s') 到 replay buffer
+
+虽然只执行 K 步，但是也算做整个 chunk 的效果。
+
+## 4. PPO 更新步骤
+
+1. 从 buffer 采样 batch
+2. 计算旧策略 log_prob(w|s)
+3. 计算 GAE 优势估计 (需要 V_w)
+4. 计算新策略 log_prob(w|s)
+5. PPO clipped objective: L = -min(ratio * advantage, clamp(ratio) * advantage)
+6. 梯度更新 + 熵正则化
+
+## 5. Q 函数更新
+
+- q_pred = Q_w(s, w)
+- q_target = r + γ * Q_w_target(s', π_w(s').sample())
+- L_Q = MSE(q_pred, q_target)
+- 软更新目标网络
+
+## 6. Action Chunk 处理
+
+- T = 完整 chunk 长度 (如 16)
+- K = 实际执行长度 (如 4)
+- 每步重新生成，不复用未执行的动作
+- 奖励 r 来自执行的 K 个动作
+
+## 7. 关键公式
+
+- 噪声策略 log_prob: log N(w|μ,σ²) = -0.5 * ||w-μ||²/σ² - d/2*log(2πσ²)
+- GAE: advantage_t = δ_t + γλ * advantage_{t+1}
+- PPO ratio: exp(log_prob_new - log_prob_old)
+
+## 8. 训练稳定性
+
+- 梯度裁剪 (max_norm=0.5)
+- 熵正则化 (coef=0.01)
+- 观测归一化
+```

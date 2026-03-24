@@ -4,6 +4,7 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf import OmegaConf
 
+from rlinf_noray.runners.libero_dsrl_ddp_runner import LiberoDSRLDDPNoRayRunner
 from rlinf_noray.runners.libero_ppo_ddp_runner import LiberoPPODDPNoRayRunner
 
 mp.set_start_method("spawn", force=True)
@@ -21,6 +22,7 @@ def main(cfg) -> None:
         "libero_10_ppo_openpi_pi0",
         "libero_10_ppo_openpi_pi05",
         "libero_10_ppo_smolvla",
+        "libero_10_dsrl_smolvla",
     }
     assert config_name in allowed_configs, (
         f"Only {sorted(allowed_configs)} are supported in noray runner, got {config_name}"
@@ -36,7 +38,16 @@ def main(cfg) -> None:
         f"Only libero env is supported in noray runner, got {env_type}"
     )
 
-    runner = LiberoPPODDPNoRayRunner(cfg)
+    if config_name == "libero_10_dsrl_smolvla":
+        if model_type != "smolvla":
+            raise ValueError(
+                "libero_10_dsrl_smolvla only supports smolvla model, got "
+                f"{model_type}"
+            )
+        runner = LiberoDSRLDDPNoRayRunner(cfg)
+    else:
+        runner = LiberoPPODDPNoRayRunner(cfg)
+
     runner.run()
 
 

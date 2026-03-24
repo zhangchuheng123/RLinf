@@ -16,6 +16,8 @@ from rlinf_noray.models.embodiment.smolvla.smolvla_policy import (
 
 ensure_local_lerobot()
 
+from lerobot.policies.smolvla.modeling_smolvla import make_att_2d_masks
+
 
 class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
     def __init__(self, cfg, policy=None) -> None:
@@ -26,6 +28,49 @@ class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
             self.env_preprocessor,
             self.env_postprocessor,
         ) = build_lerobot_pre_post_processors(self.policy, cfg.model_path)
+
+    def get_dsrl_state_dim(self) -> int:
+        hidden_size = int(self.policy.model.vlm_with_expert.config.text_config.hidden_size)
+        return hidden_size * 2
+
+    @torch.no_grad()
+    def _extract_dsrl_state_features_from_batch(self, batch_obs: dict[str, Any]) -> torch.Tensor:
+        images, img_masks = self.policy.prepare_images(batch_obs)
+        state = self.policy.prepare_state(batch_obs)
+        lang_tokens = batch_obs["observation.language.tokens"]
+        lang_masks = batch_obs["observation.language.attention_mask"]
+
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.policy.model.embed_prefix(
+            images,
+            img_masks,
+            lang_tokens,
+            lang_masks,
+            state=state,
+        )
+        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+
+        outputs_embeds, _ = self.policy.model.vlm_with_expert.forward(
+            attention_mask=prefix_att_2d_masks,
+            position_ids=prefix_position_ids,
+            past_key_values=None,
+            inputs_embeds=[prefix_embs, None],
+            use_cache=self.policy.config.use_cache,
+            fill_kv_cache=True,
+        )
+
+        prefix_last_layer = outputs_embeds[0]
+        last_token = prefix_last_layer[:, -1, :]
+        last_layer_mean = prefix_last_layer.mean(dim=1)
+        dsrl_features = torch.cat([last_token, last_layer_mean], dim=-1)
+        return dsrl_features
+
+    @torch.no_grad()
+    def extract_dsrl_state_features(self, env_obs: dict[str, Any]) -> torch.Tensor:
+        device = next(self.policy.parameters()).device
+        batch_obs = self._preprocess_obs_batch(env_obs, device=device)
+        features = self._extract_dsrl_state_features_from_batch(batch_obs)
+        return features.detach().cpu()
 
     def _preprocess_obs_batch(self, env_obs: dict[str, Any], device: torch.device) -> dict[str, Any]:
         batch_obs = run_lerobot_inference_preprocess(
@@ -70,6 +115,8 @@ class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
         if "external_policy_noise" in kwargs:
             policy_noise = kwargs["external_policy_noise"]
 
+        dsrl_state_features = self._extract_dsrl_state_features_from_batch(batch_obs)
+
         action_norm, action_chunk = self.policy.select_action(
             batch_obs,
             noise=policy_noise,
@@ -97,6 +144,7 @@ class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
             "timestep": timestep.detach().cpu(),
             "norm_actions": action_chunk.detach().cpu(),
             "states": states.cpu() if isinstance(states, torch.Tensor) else torch.as_tensor(states),
+            "dsrl_state_features": dsrl_state_features.detach().cpu(),
             "main_images": env_obs[self.main_image_env_key].cpu(),
             "wrist_images": (
                 env_obs[self.wrist_image_env_key].cpu()

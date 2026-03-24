@@ -413,6 +413,11 @@ class LiberoPPODDPNoRayRunner:
             # success: (num_envs, ) float32
             # TODO: There is a risk when an agent completes the task within the chunk
 
+            if dones.sum().item() > 0:
+                import pdb; pdb.set_trace()  # --- IGNORE ---
+                # check what will happen if terminate or truncate happens in the middle of the chunk;
+                #  currently we only check at the end of the chunk, which may cause issues for credit assignment
+
             sums[0] += float(chunk_returns.sum().item())        # Return
             sums[1] += float(chunk_rewards.numel())             # Length
             sums[2] += float(dones.sum().item())                # Num of trajs  
