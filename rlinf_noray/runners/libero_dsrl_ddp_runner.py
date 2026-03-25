@@ -421,6 +421,28 @@ class LiberoDSRLDDPNoRayRunner:
         scaled = gaussian_like * self.policy_noise_scale + self.policy_noise_bias
         return scaled.reshape(-1, self.chunk_size, self.max_action_dim)
 
+    @staticmethod
+    def _flat_to_env_time(tensor: torch.Tensor, num_envs: int) -> torch.Tensor:
+        if tensor.ndim < 1:
+            raise ValueError(f"Expected tensor with ndim >= 1, got {tensor.ndim}")
+        if num_envs <= 0:
+            raise ValueError(f"num_envs must be > 0, got {num_envs}")
+        if tensor.shape[0] % num_envs != 0:
+            raise ValueError(
+                f"Leading dimension {tensor.shape[0]} is not divisible by num_envs={num_envs}"
+            )
+
+        num_steps = tensor.shape[0] // num_envs
+        reshaped = tensor.reshape(num_steps, num_envs, *tensor.shape[1:])
+        return reshaped.permute(1, 0, *range(2, reshaped.ndim)).contiguous()
+
+    @staticmethod
+    def _env_time_to_flat(tensor: torch.Tensor) -> torch.Tensor:
+        if tensor.ndim < 2:
+            raise ValueError(f"Expected tensor with ndim >= 2, got {tensor.ndim}")
+        permuted = tensor.permute(1, 0, *range(2, tensor.ndim)).contiguous()
+        return permuted.reshape(-1, *tensor.shape[2:])
+
     def _collect_rollouts(
         self,
         env,
@@ -495,8 +517,6 @@ class LiberoDSRLDDPNoRayRunner:
             stats[2] += float(dones.sum().item())
             stats[3] += float(success.sum().item())
 
-            import pdb; pdb.set_trace()
-
             old_logprob_cpu = old_logprob.detach().cpu().float()
             action_cpu = noise_latent.detach().cpu().float()
             for idx in range(dsrl_states.shape[0]):
@@ -537,15 +557,37 @@ class LiberoDSRLDDPNoRayRunner:
         next_values: torch.Tensor,
         dones: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if rewards.ndim != 1:
+            raise ValueError(f"Expected flat rewards shape [N*T], got {tuple(rewards.shape)}")
+        if values.shape != rewards.shape or next_values.shape != rewards.shape or dones.shape != rewards.shape:
+            raise ValueError(
+                "values/next_values/dones must have same shape as rewards, "
+                f"got rewards={tuple(rewards.shape)}, values={tuple(values.shape)}, "
+                f"next_values={tuple(next_values.shape)}, dones={tuple(dones.shape)}"
+            )
 
-        advantages = torch.zeros_like(rewards)
-        gae = torch.tensor(0.0, device=rewards.device)
-        for idx in reversed(range(rewards.shape[0])):
-            not_done = 1.0 - dones[idx]
-            delta = rewards[idx] + self.gamma * next_values[idx] * not_done - values[idx]
+        rewards_env_time = self._flat_to_env_time(rewards, self.local_num_envs)
+        values_env_time = self._flat_to_env_time(values, self.local_num_envs)
+        next_values_env_time = self._flat_to_env_time(next_values, self.local_num_envs)
+        dones_env_time = self._flat_to_env_time(dones, self.local_num_envs)
+
+        advantages_env_time = torch.zeros_like(rewards_env_time)
+        gae = torch.zeros(
+            rewards_env_time.shape[0], device=rewards.device, dtype=rewards.dtype
+        )
+        for step_idx in reversed(range(rewards_env_time.shape[1])):
+            not_done = 1.0 - dones_env_time[:, step_idx]
+            delta = (
+                rewards_env_time[:, step_idx]
+                + self.gamma * next_values_env_time[:, step_idx] * not_done
+                - values_env_time[:, step_idx]
+            )
             gae = delta + self.gamma * self.gae_lambda * not_done * gae
-            advantages[idx] = gae
-        returns = advantages + values
+            advantages_env_time[:, step_idx] = gae
+
+        returns_env_time = advantages_env_time + values_env_time
+        advantages = self._env_time_to_flat(advantages_env_time)
+        returns = self._env_time_to_flat(returns_env_time)
         return advantages, returns
 
     def _ppo_update(self, transitions: list[Transition]) -> dict[str, float]:
@@ -576,8 +618,6 @@ class LiberoDSRLDDPNoRayRunner:
             "ratio": 0.0,
         }
         updates = 0
-
-        import pdb; pdb.set_trace()
 
         for _ in range(self.update_epoch):
             # norm_states = self.state_norm.normalize(states, self.device)
@@ -616,9 +656,7 @@ class LiberoDSRLDDPNoRayRunner:
             metrics_acc["ratio"] += float(ratio.detach().mean().item())
             updates += 1
 
-            print(value_loss) 
-
-        import pdb; pdb.set_trace()
+            print("value loss:", value_loss) 
 
         assert updates > 0, "PPO update produced zero optimization steps"
         for key in metrics_acc:
@@ -668,8 +706,6 @@ class LiberoDSRLDDPNoRayRunner:
                 save_video=self.save_rollout_video,
                 mode="train",
             )
-
-            import pdb; pdb.set_trace()
 
             ppo_metrics = self._ppo_update(transitions)
 
