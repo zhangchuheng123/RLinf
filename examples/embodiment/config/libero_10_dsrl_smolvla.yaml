@@ -53,7 +53,9 @@ wandb:
 algorithm:
   rollout_epoch: 8
   eval_rollout_epoch: 1
-  update_epoch: 4
+  update_epoch: 10
+  dsrl_minibatch_size: 1024
+  dsrl_replay_buffer_capacity: 3000
 
   gamma: 0.99
   gae_lambda: 0.95
@@ -114,8 +116,8 @@ actor:
 
   optim:
     lr: 5.0e-6
-    dsrl_actor_lr: 1.0e-4
-    dsrl_value_lr: 1.0e-4
+    dsrl_actor_lr: 1.0e-5
+    dsrl_value_lr: 2.0e-5
     adam_beta1: 0.9
     adam_beta2: 0.95
     adam_eps: 1.0e-08

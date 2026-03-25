@@ -16,8 +16,6 @@ export PYTHONPATH="${REPO_PATH}"
 export UV_PROJECT_ENVIRONMENT="${REPO_PATH}/.venv"
 export EMBODIED_PATH="${EMBODIED_PATH}"
 
-# DSRL debug script: force-disable wandb.
-export WANDB_DISABLED="true"
 LOGGER_BACKENDS_OVERRIDE='runner.logger.logger_backends=[tensorboard]'
 
 CONFIG_NAME="libero_10_dsrl_smolvla"
@@ -37,8 +35,10 @@ SAVE_EVAL_VIDEO="${SAVE_EVAL_VIDEO:-True}"
 SAVE_ROLLOUT_VIDEO="${SAVE_ROLLOUT_VIDEO:-False}"
 
 DSRL_HIDDEN_DIM="${DSRL_HIDDEN_DIM:-256}"
-DSRL_ACTOR_LR="${DSRL_ACTOR_LR:-1e-4}"
-DSRL_VALUE_LR="${DSRL_VALUE_LR:-1e-4}"
+DSRL_ACTOR_LR="${DSRL_ACTOR_LR:-1e-5}"
+DSRL_VALUE_LR="${DSRL_VALUE_LR:-2e-5}"
+DSRL_MINIBATCH_SIZE="${DSRL_MINIBATCH_SIZE:-1024}"
+DSRL_REPLAY_CAPACITY="${DSRL_REPLAY_CAPACITY:-3000}"
 
 LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}_noray"
 EVAL_VIDEO_BASE_DIR="${EVAL_VIDEO_BASE_DIR:-${LOG_DIR}/video/eval}"
@@ -69,6 +69,8 @@ HYDRA_OVERRIDES=(
   "actor.fsdp_config.disable=True"
   "actor.optim.dsrl_actor_lr=${DSRL_ACTOR_LR}"
   "actor.optim.dsrl_value_lr=${DSRL_VALUE_LR}"
+  "algorithm.dsrl_minibatch_size=${DSRL_MINIBATCH_SIZE}"
+  "algorithm.dsrl_replay_buffer_capacity=${DSRL_REPLAY_CAPACITY}"
   "${LOGGER_BACKENDS_OVERRIDE}"
 )
 

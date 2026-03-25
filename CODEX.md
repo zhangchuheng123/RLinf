@@ -279,3 +279,30 @@ RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" D
 基础信息：
 - rlinf 是作为参考的目录，不要引用和修改其中的内容；rlinf_noray（简称 noray）是主要的工作目录；lerobot 是辅助目录，可以可以修改其中内容，但尽量少改。
 - 请用尽量少的修改完成任务，不要通过设置默认值和各种兜底来掩盖预期外的错误，有错误请让它及时抛出；比如，不要使用 get('xxx', default)。
+- 程序主入口为 SAVE_ROLLOUT_VIDEO=1 bash examples/embodiment/run_libero_dsrl_smolvla_noray.sh，主逻辑在 rlinf_noray/runners/libero_dsrl_ddp_runner.py 中。
+
+任务要求：
+1）维护一个 replay buffer（一个新的类，直接写在 rlinf_noray/runners/libero_dsrl_ddp_runner.py 中），它最多能装最近的 3000 个 transitions。assert 该参数要求能被训练并行 env 数量整除。内部维护 data = list of transitions, 每个并行 env 有一个 transitions 队列。
+
+2）在 ppo_update 中，每次对于 minibatch_size = 1024 个 transition 采样（有放回），然后更新 update_epoch=10 次。这里也调用 replay buffer 的采样功能，采样之前，buffer 里面的量应该都计算完毕了。value net 的学习率需要是 policy net 的两倍：policy = 1e-5, value = 2e-5。
+
+3）在 mode=train 时 collect rollout 的时候，除了最开始需要 reset 之外，其他时候都需要接着上一次继续 rollout。但是 mode=eval 的时候行为不变。rollout 返回的结果应该为 list of transitions, 然后通过 replay buffer 的方法添加进去。
+
+4）replay buffer 添加新数据之后，通过 done 来观察轨迹是否完整。如果完整，则对其向前计算 Monte Carlo returns；否则，不对其计算 returns。只有完整的轨迹（标记为有效）可以参与到后续的 PPO 采样中。replay buffer 通过 done=True 那个 transition 上的 reward 是否大于零来判断这条轨迹是否成功，然后保存最近 20 条轨迹的成功或者失败信息，这一步上输出成功轨迹条数、总轨迹条数（最多20）、成功率。
+
+5）在 PPO update 中，给定特定 value model 之后，再利用 replay buffer 自身的方法，对其中所有有效的 transition 预测 value。注意，现在代码重复计算了 values 和 next_values，这其实低效了，不要这样做。然后根据新标的 values，再往回捋，计算 GAE。这里注意实现要高效，可以按照 num_envs 并行化；非有效的数据按照 done 一样处理，不会往回传。跨轨迹的数据因为有 done 分割，也不会把后一条的信息传回前一条。这里请格外注意计算的正确性。计算完 advantages 之后还需要对 advantage 做归一化。
+
+注意：
+- buffer 中每个 transition 大概有这些量 (state, action, reward, next_state, done, effective, returns, advantage)，如果有没考虑全的，可以再增加。
+- 上面提到的均为默认参数，请把它们写到配置文件中。
+
+参考：GAE 计算
+
+for i in reversed(range(batch_size)):
+    returns[i] = rewards[i] + self.config.gamma * prev_return * masks[i]
+    deltas[i] = rewards[i] + self.config.gamma * prev_value * masks[i] - values[i]
+    advantages[i] = deltas[i] + self.config.gamma * self.config.lamda * prev_advantage * masks[i]
+
+    prev_return = returns[i]
+    prev_value = values[i]
+    prev_advantage = advantages[i]

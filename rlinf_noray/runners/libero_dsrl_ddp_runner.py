@@ -21,7 +21,7 @@ from rlinf_noray.models.embodiment.modules.gaussian_policy import GaussianPolicy
 from rlinf_noray.utils.metric_logger import MetricLogger
 
 
-@dataclass
+@dataclass(eq=False)
 class Transition:
     state: torch.Tensor
     next_state: torch.Tensor
@@ -29,6 +29,147 @@ class Transition:
     old_logprob: torch.Tensor
     reward: torch.Tensor
     done: torch.Tensor
+    env_id: int = -1
+    effective: bool = False
+    returns: float = 0.0
+    advantage: float = 0.0
+    value_target: float = 0.0
+
+
+class ReplayBuffer:
+    def __init__(self, capacity: int, num_envs: int, verbose: bool):
+        assert capacity % num_envs == 0, (
+            f"replay capacity={capacity} must be divisible by num_envs={num_envs}"
+        )
+        self.capacity = capacity
+        self.num_envs = num_envs
+        self.verbose = verbose
+
+        self.data: list[Transition] = []
+        self.env_queues: list[list[Transition]] = [[] for _ in range(num_envs)]
+        self._pending_by_env: list[list[Transition]] = [[] for _ in range(num_envs)]
+        self._recent_success = deque(maxlen=20)
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def _remove_entry(self, entry: Transition) -> None:
+        env_id = entry.env_id
+        if entry in self.env_queues[env_id]:
+            self.env_queues[env_id].remove(entry)
+        if entry in self._pending_by_env[env_id]:
+            self._pending_by_env[env_id].remove(entry)
+
+    def _append_entry(self, entry: Transition) -> None:
+        self.data.append(entry)
+        self.env_queues[entry.env_id].append(entry)
+        while len(self.data) > self.capacity:
+            dropped = self.data.pop(0)
+            self._remove_entry(dropped)
+
+    def _mark_completed_trajectory(self, trajectory: list[Transition], gamma: float) -> None:
+        running_return = 0.0
+        for transition in reversed(trajectory):
+            running_return = float(transition.reward) + gamma * running_return
+            transition.returns = running_return
+            transition.effective = True
+
+        success = float(trajectory[-1].reward) > 0.0
+        self._recent_success.append(1 if success else 0)
+        if self.verbose:
+            total = len(self._recent_success)
+            succ = int(sum(self._recent_success))
+            rate = (succ / float(total)) if total > 0 else 0.0
+            print(
+                (
+                    "[noray][dsrl][replay] "
+                    f"recent_success={succ}/{total} "
+                    f"success_rate={rate:.4f}"
+                ),
+                flush=True,
+            )
+
+    def add_rollout(self, transitions: list[Transition], gamma: float) -> None:
+        for transition_idx, transition in enumerate(transitions):
+            env_id = transition_idx % self.num_envs
+            transition.env_id = env_id
+            transition.effective = False
+            transition.returns = 0.0
+            transition.advantage = 0.0
+            transition.value_target = 0.0
+
+            self._append_entry(transition)
+            self._pending_by_env[env_id].append(transition)
+
+            if bool(transition.done):
+                finished = self._pending_by_env[env_id]
+                assert finished, "pending trajectory should not be empty when done=True"
+                self._mark_completed_trajectory(finished, gamma)
+                self._pending_by_env[env_id] = []
+
+    def _effective_entries(self) -> list[Transition]:
+        return [transition for transition in self.data if transition.effective]
+
+    def prepare_gae_targets(
+        self,
+        value_model: DistributedDataParallel,
+        device: torch.device,
+        gamma: float,
+        gae_lambda: float,
+    ) -> int:
+        effective_entries = self._effective_entries()
+        if not effective_entries:
+            return 0
+
+        states = torch.stack([entry.state for entry in effective_entries], dim=0).to(device)
+        next_states = torch.stack([entry.next_state for entry in effective_entries], dim=0).to(device)
+
+        with torch.no_grad():
+            values = value_model(states).float().detach().cpu()
+            next_values = value_model(next_states).float().detach().cpu()
+
+        next_value_by_id: dict[int, float] = {}
+        for index, entry in enumerate(effective_entries):
+            entry_value = float(values[index].item())
+            entry_next_value = float(next_values[index].item())
+            entry.value_target = entry_value
+            entry.advantage = 0.0
+            entry.returns = entry.returns
+            next_value_by_id[id(entry)] = entry_next_value
+
+        for env_id in range(self.num_envs):
+            env_entries = [entry for entry in self.env_queues[env_id] if entry.effective]
+            if not env_entries:
+                continue
+
+            gae = 0.0
+            for entry in reversed(env_entries):
+                done_mask = 0.0 if bool(entry.done) else 1.0
+                delta = (
+                    float(entry.reward)
+                    + gamma * next_value_by_id[id(entry)] * done_mask
+                    - entry.value_target
+                )
+                gae = delta + gamma * gae_lambda * done_mask * gae
+                entry.advantage = gae
+                entry.value_target = gae + entry.value_target
+
+        advantages = torch.tensor(
+            [entry.advantage for entry in effective_entries], dtype=torch.float32
+        )
+        mean = float(advantages.mean().item())
+        std = float(advantages.std(unbiased=False).item())
+        denom = max(std, 1e-6)
+        for entry in effective_entries:
+            entry.advantage = (entry.advantage - mean) / denom
+
+        return len(effective_entries)
+
+    def sample(self, batch_size: int) -> list[Transition]:
+        effective_entries = self._effective_entries()
+        assert effective_entries, "No effective transitions available in replay buffer"
+        indices = np.random.choice(len(effective_entries), size=batch_size, replace=True)
+        return [effective_entries[int(index)] for index in indices]
 
 
 class RunningNorm:
@@ -239,6 +380,15 @@ class LiberoDSRLDDPNoRayRunner:
         self.max_log_ratio = float(cfg.algorithm.dsrl_max_log_ratio)
         self.entropy_coef = float(cfg.algorithm.dsrl_entropy_coef)
         self.grad_clip = float(cfg.actor.optim.clip_grad)
+        self.minibatch_size = int(cfg.algorithm.dsrl_minibatch_size)
+        replay_capacity = int(cfg.algorithm.dsrl_replay_buffer_capacity)
+        assert replay_capacity > 0, f"algorithm.dsrl_replay_buffer_capacity must be > 0, got {replay_capacity}"
+        assert self.minibatch_size > 0, f"algorithm.dsrl_minibatch_size must be > 0, got {self.minibatch_size}"
+        self.replay_buffer = ReplayBuffer(
+            capacity=replay_capacity,
+            num_envs=self.local_num_envs,
+            verbose=self.rank == 0,
+        )
         # self.state_norm = RunningNorm(self.state_dim)
 
         self.metric_logger = MetricLogger(cfg) if self.rank == 0 else None
@@ -266,6 +416,8 @@ class LiberoDSRLDDPNoRayRunner:
                 "max_log_ratio": self.max_log_ratio,
                 "entropy_coef": self.entropy_coef,
                 "grad_clip": self.grad_clip,
+                "minibatch_size": self.minibatch_size,
+                "replay_capacity": replay_capacity,
                 "policy_noise_eps": self.policy_noise_eps,
                 "policy_noise_scale": self.policy_noise_scale,
                 "policy_noise_bias": self.policy_noise_bias,
@@ -275,6 +427,9 @@ class LiberoDSRLDDPNoRayRunner:
                 "rollout_video_base_dir": self.rollout_video_base_dir,
             }
             print(f"[noray][dsrl][init] {json.dumps(init_summary, sort_keys=True)}", flush=True)
+
+            self._train_obs: dict[str, Any] | None = None
+            self._train_dsrl_states: torch.Tensor | None = None
 
     @staticmethod
     def _to_uint8_hwc(img: Any) -> np.ndarray:
@@ -452,9 +607,12 @@ class LiberoDSRLDDPNoRayRunner:
         save_video: bool,
         mode: str,
     ) -> tuple[list[Transition], dict[str, float]]:
-
-        obs, _ = env.reset()
-        current_dsrl_states = self.generator.extract_dsrl_state_features(obs).float()
+        if mode == "train" and self._train_obs is not None and self._train_dsrl_states is not None:
+            obs = self._train_obs
+            current_dsrl_states = self._train_dsrl_states
+        else:
+            obs, _ = env.reset()
+            current_dsrl_states = self.generator.extract_dsrl_state_features(obs).float()
 
         transitions: list[Transition] = []
         video_buffers: dict[str, Any] | None = None
@@ -535,6 +693,10 @@ class LiberoDSRLDDPNoRayRunner:
             obs = next_obs
             progress_bar.update(1)
 
+        if mode == "train":
+            self._train_obs = obs
+            self._train_dsrl_states = current_dsrl_states
+
         stats = stats.to(self.device)
         dist.all_reduce(stats, op=dist.ReduceOp.SUM)
 
@@ -590,26 +752,16 @@ class LiberoDSRLDDPNoRayRunner:
         returns = self._env_time_to_flat(returns_env_time)
         return advantages, returns
 
-    def _ppo_update(self, transitions: list[Transition]) -> dict[str, float]:
-        if not transitions:
+    def _ppo_update(self) -> dict[str, float]:
+
+        effective_count = self.replay_buffer.prepare_gae_targets(
+            value_model=self.value_net,
+            device=self.device,
+            gamma=self.gamma,
+            gae_lambda=self.gae_lambda,
+        )
+        if effective_count == 0:
             return {}
-
-        states = torch.stack([transition.state for transition in transitions], dim=0).to(self.device)
-        actions = torch.stack([transition.action for transition in transitions], dim=0).to(self.device)
-        rewards = torch.stack([transition.reward for transition in transitions], dim=0).to(self.device)
-        dones = torch.stack([transition.done for transition in transitions], dim=0).to(self.device)
-        next_states = torch.stack([transition.next_state for transition in transitions], dim=0).to(self.device)
-
-        with torch.no_grad():
-            # norm_states = self.state_norm.normalize(states, self.device)
-            # norm_next_states = self.state_norm.normalize(next_states, self.device)
-            norm_states = states.to(self.device)
-            norm_next_states = next_states.to(self.device)
-            old_logprobs, _ = self.actor.module.evaluate_actions(norm_states, actions)
-            values = self.value_net(norm_states).float()
-            next_values = self.value_net(norm_next_states).float()
-            advantages, returns = self._compute_gae(rewards, values, next_values, dones)
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-6)
 
         metrics_acc = {
             "ppo_loss": 0.0,
@@ -620,7 +772,26 @@ class LiberoDSRLDDPNoRayRunner:
         updates = 0
 
         for _ in range(self.update_epoch):
-            # norm_states = self.state_norm.normalize(states, self.device)
+            batch = self.replay_buffer.sample(self.minibatch_size)
+
+            states = torch.stack([transition.state for transition in batch], dim=0).to(self.device)
+            actions = torch.stack([transition.action for transition in batch], dim=0).to(self.device)
+            old_logprobs = torch.tensor(
+                [float(transition.old_logprob.item()) for transition in batch],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            advantages = torch.tensor(
+                [transition.advantage for transition in batch],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            returns = torch.tensor(
+                [transition.value_target for transition in batch],
+                dtype=torch.float32,
+                device=self.device,
+            )
+
             norm_states = states.to(self.device)
             new_logprobs, entropy = self.actor.module.evaluate_actions(norm_states, actions)
             log_ratio = (new_logprobs.float() - old_logprobs.float()).clamp(
@@ -639,10 +810,7 @@ class LiberoDSRLDDPNoRayRunner:
 
             self.actor_optimizer.zero_grad(set_to_none=True)
             total_actor_loss.backward()
-            torch.nn.utils.clip_grad_norm_(
-                self.actor.parameters(),
-                self.grad_clip,
-            )
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip)
             self.actor_optimizer.step()
 
             self.value_optimizer.zero_grad(set_to_none=True)
@@ -707,7 +875,9 @@ class LiberoDSRLDDPNoRayRunner:
                 mode="train",
             )
 
-            ppo_metrics = self._ppo_update(transitions)
+            self.replay_buffer.add_rollout(transitions, gamma=self.gamma)
+
+            ppo_metrics = self._ppo_update()
 
             eval_metrics = {}
             if self.eval_env is not None and self.val_check_interval > 0:
@@ -723,6 +893,7 @@ class LiberoDSRLDDPNoRayRunner:
                     "rollout/total_trajectories": rollout_metrics["total_trajectories"],
                     "rollout/success_trajectories": rollout_metrics["success_trajectories"],
                     "train/transition_count": float(len(transitions)),
+                    "train/replay_size": float(len(self.replay_buffer)),
                 }
                 metrics_to_log.update({f"train/{key}": value for key, value in ppo_metrics.items()})
                 metrics_to_log.update(eval_metrics)
