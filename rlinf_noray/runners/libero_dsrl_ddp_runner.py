@@ -557,18 +557,26 @@ class LiberoDSRLDDPNoRayRunner:
 
     def _sample_noise_policy(
         self, states: torch.Tensor, deterministic: bool
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         # norm_states = self.state_norm.normalize(states, self.device)
         norm_states = states.to(self.device)
 
-        noise, logprob = self.actor.module.sample(norm_states, deterministic=deterministic)
+        noise, logprob, actor_mean, actor_logstd = self.actor.module.sample(
+            norm_states,
+            deterministic=deterministic,
+            return_stats=True,
+        )
         # noise: [B, 1, noise_dim=1600=50*32]
         # logprob: [B,]
         noise = noise[:, 0, :].float()
         entropy = torch.zeros_like(logprob)
         if not deterministic:
-            _, entropy = self.actor.module.evaluate_actions(norm_states, noise)
-        return noise, logprob.float(), entropy.float()
+            _, entropy = self.actor.module.evaluate_actions(
+                norm_states,
+                noise,
+                average_entropy=True,
+            )
+        return noise, logprob.float(), entropy.float(), actor_mean.float(), actor_logstd.float()
 
     def _noise_to_policy_noise(self, noise_latent: torch.Tensor) -> torch.Tensor:
         latent = torch.clamp(noise_latent, -1.0 + self.policy_noise_eps, 1.0 - self.policy_noise_eps)
@@ -621,6 +629,14 @@ class LiberoDSRLDDPNoRayRunner:
 
         stats = torch.zeros(4, dtype=torch.float64)
         # [return_sum, step_count, done_count, success_count]
+        noise_sum = 0.0
+        noise_sq_sum = 0.0
+        noise_count = 0
+        actor_mean_sum = 0.0
+        actor_mean_sq_sum = 0.0
+        actor_logstd_sum = 0.0
+        actor_logstd_sq_sum = 0.0
+        actor_stat_count = 0
 
         total_chunks = rollout_epoch * chunk_steps
         progress_bar = tqdm(
@@ -636,7 +652,7 @@ class LiberoDSRLDDPNoRayRunner:
                 # dsrl_states: [B, state_dim=960 * 2] (concat last token and mean-pooled)
                 # self.state_norm.update(dsrl_states)
 
-                noise_latent, old_logprob, _ = self._sample_noise_policy(
+                noise_latent, old_logprob, _, actor_mean, actor_logstd = self._sample_noise_policy(
                     dsrl_states.to(self.device),
                     deterministic=deterministic,
                 )
@@ -675,6 +691,16 @@ class LiberoDSRLDDPNoRayRunner:
             stats[2] += float(dones.sum().item())
             stats[3] += float(success.sum().item())
 
+            noise_sum += float(noise_latent.sum().item())
+            noise_sq_sum += float((noise_latent * noise_latent).sum().item())
+            noise_count += int(noise_latent.numel())
+
+            actor_mean_sum += float(actor_mean.sum().item())
+            actor_mean_sq_sum += float((actor_mean * actor_mean).sum().item())
+            actor_logstd_sum += float(actor_logstd.sum().item())
+            actor_logstd_sq_sum += float((actor_logstd * actor_logstd).sum().item())
+            actor_stat_count += int(actor_mean.numel())
+
             old_logprob_cpu = old_logprob.detach().cpu().float()
             action_cpu = noise_latent.detach().cpu().float()
             for idx in range(dsrl_states.shape[0]):
@@ -702,6 +728,19 @@ class LiberoDSRLDDPNoRayRunner:
 
         done_count = max(float(stats[2].item()), 1.0)
         step_count = max(float(stats[1].item()), 1.0)
+        noise_mean = noise_sum / float(max(noise_count, 1))
+        noise_var = max(noise_sq_sum / float(max(noise_count, 1)) - noise_mean * noise_mean, 0.0)
+        actor_mean_mean = actor_mean_sum / float(max(actor_stat_count, 1))
+        actor_mean_var = max(
+            actor_mean_sq_sum / float(max(actor_stat_count, 1)) - actor_mean_mean * actor_mean_mean,
+            0.0,
+        )
+        actor_logstd_mean = actor_logstd_sum / float(max(actor_stat_count, 1))
+        actor_logstd_var = max(
+            actor_logstd_sq_sum / float(max(actor_stat_count, 1))
+            - actor_logstd_mean * actor_logstd_mean,
+            0.0,
+        )
         metrics = {
             "return_per_step": float(stats[0].item() / step_count),
             "return_per_traj_running": float(stats[0].item() / done_count),
@@ -709,6 +748,12 @@ class LiberoDSRLDDPNoRayRunner:
             "success_rate": float(stats[3].item() / done_count),
             "total_trajectories": float(stats[2].item()),
             "success_trajectories": float(stats[3].item()),
+            "noise_latent_mean": float(noise_mean),
+            "noise_latent_std": float(np.sqrt(noise_var)),
+            "actor_mean_mean": float(actor_mean_mean),
+            "actor_mean_std": float(np.sqrt(actor_mean_var)),
+            "actor_logstd_mean": float(actor_logstd_mean),
+            "actor_logstd_std": float(np.sqrt(actor_logstd_var)),
         }
         return transitions, metrics
 
@@ -768,6 +813,7 @@ class LiberoDSRLDDPNoRayRunner:
             "value_loss": 0.0,
             "entropy": 0.0,
             "ratio": 0.0,
+            "clip_fraction": 0.0,
         }
         updates = 0
 
@@ -793,15 +839,24 @@ class LiberoDSRLDDPNoRayRunner:
             )
 
             norm_states = states.to(self.device)
-            new_logprobs, entropy = self.actor.module.evaluate_actions(norm_states, actions)
+            new_logprobs, entropy = self.actor.module.evaluate_actions(
+                norm_states,
+                actions,
+                average_entropy=True,
+            )
             log_ratio = (new_logprobs.float() - old_logprobs.float()).clamp(
                 min=-self.max_log_ratio,
                 max=self.max_log_ratio,
             )
             ratio = torch.exp(log_ratio)
             clipped_ratio = torch.clamp(ratio, 1.0 - self.ppo_clip, 1.0 + self.ppo_clip)
-            policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
-            entropy_loss = -self.entropy_coef * entropy.mean()
+            clip_fraction = (
+                torch.logical_or(ratio > (1.0 + self.ppo_clip), ratio < (1.0 - self.ppo_clip))
+                .float()
+                .mean()
+            )
+            policy_loss = - torch.min(ratio * advantages, clipped_ratio * advantages).mean()
+            entropy_loss = - self.entropy_coef * entropy.mean()
 
             value_pred = self.value_net(norm_states).float()
             value_loss = torch.nn.functional.mse_loss(value_pred, returns)
@@ -822,9 +877,8 @@ class LiberoDSRLDDPNoRayRunner:
             metrics_acc["value_loss"] += float(value_loss.detach().item())
             metrics_acc["entropy"] += float(entropy.detach().mean().item())
             metrics_acc["ratio"] += float(ratio.detach().mean().item())
+            metrics_acc["clip_fraction"] += float(clip_fraction.detach().item())
             updates += 1
-
-            print("value loss:", value_loss) 
 
         assert updates > 0, "PPO update produced zero optimization steps"
         for key in metrics_acc:
@@ -892,6 +946,12 @@ class LiberoDSRLDDPNoRayRunner:
                     "rollout/success_rate": rollout_metrics["success_rate"],
                     "rollout/total_trajectories": rollout_metrics["total_trajectories"],
                     "rollout/success_trajectories": rollout_metrics["success_trajectories"],
+                    "rollout/noise_latent_mean": rollout_metrics["noise_latent_mean"],
+                    "rollout/noise_latent_std": rollout_metrics["noise_latent_std"],
+                    "rollout/actor_mean_mean": rollout_metrics["actor_mean_mean"],
+                    "rollout/actor_mean_std": rollout_metrics["actor_mean_std"],
+                    "rollout/actor_logstd_mean": rollout_metrics["actor_logstd_mean"],
+                    "rollout/actor_logstd_std": rollout_metrics["actor_logstd_std"],
                     "train/transition_count": float(len(transitions)),
                     "train/replay_size": float(len(self.replay_buffer)),
                 }
@@ -902,6 +962,12 @@ class LiberoDSRLDDPNoRayRunner:
                     (
                         f"[noray][dsrl] epoch={epoch} trans={len(transitions)} "
                         f"ppo={ppo_metrics['ppo_loss']:.6f} "
+                        f"value={ppo_metrics['value_loss']:.6f} "
+                        f"clip_frac={ppo_metrics['clip_fraction']:.4f} "
+                        f"noise_mean={rollout_metrics['noise_latent_mean']:.4f} "
+                        f"noise_std={rollout_metrics['noise_latent_std']:.4f} "
+                        f"actor_mean={rollout_metrics['actor_mean_mean']:.4f} "
+                        f"actor_logstd={rollout_metrics['actor_logstd_mean']:.4f} "
                         f"total_traj={rollout_metrics['total_trajectories']:.0f} "
                         f"success_traj={rollout_metrics['success_trajectories']:.0f} "
                         f"success={rollout_metrics['success_rate']:.4f}"

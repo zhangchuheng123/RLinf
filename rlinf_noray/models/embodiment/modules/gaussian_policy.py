@@ -19,6 +19,9 @@ import torch
 import torch.nn as nn
 
 
+_LOG_2PI = float(torch.log(torch.tensor(2.0 * torch.pi)).item())
+
+
 class TanhTransform(torch.distributions.Transform):
     """Tanh bijective transform with automatic log_abs_det_jacobian.
 
@@ -46,11 +49,8 @@ class TanhTransform(torch.distributions.Transform):
         return 0.5 * torch.log((1 + y) / (1 - y))
 
     def log_abs_det_jacobian(self, x, y):
-        # log|det J| = sum(log(1 - tanh^2(x_i))) = sum(log(1 - y_i^2))
-        return torch.sum(
-            torch.log(1 - y.pow(2) + 1e-7),  # Small epsilon to prevent log(0)
-            dim=-1,
-        )
+        # Elementwise log|det J_i|; TransformedDistribution will handle event reduction.
+        return torch.log(1 - y.pow(2) + 1e-7)
 
 
 class SquashedNormal(torch.distributions.TransformedDistribution):
@@ -103,11 +103,8 @@ class SquashedNormal(torch.distributions.TransformedDistribution):
                     return (y - self.shift) / self.scale
 
                 def log_abs_det_jacobian(self, x, y):
-                    # Constant scaling: log det = log(scale), summed over event dims
-                    return torch.sum(
-                        torch.log(torch.abs(self.scale) * torch.ones_like(x)),
-                        dim=-1,
-                    )
+                    # Elementwise log|det J_i|; event reduction is handled upstream.
+                    return torch.log(torch.abs(self.scale) * torch.ones_like(x))
 
             transforms.append(RescaleTransform(scale_factor, shift))
 
@@ -219,7 +216,42 @@ class GaussianPolicy(nn.Module):
 
         return dist
 
-    def sample(self, features, deterministic=False):
+    def _compute_mean_log_std(self, features):
+        h = self.shared_net(features)
+        mean = self.mean_layer(h)
+        log_std = self.log_std_layer(h)
+        log_std = torch.clamp(log_std, -20, 2)
+        return mean, log_std
+
+    def _log_prob_from_stats(self, mean, log_std, actions):
+        if actions.dim() == 3:
+            actions = actions[:, 0, :]
+
+        if self.low is not None and self.high is not None:
+            scale_factor = (self.high - self.low) / 2.0
+            shift = (self.high + self.low) / 2.0
+            y_t = (actions - shift) / scale_factor
+            log_scale = torch.log(torch.abs(scale_factor) * torch.ones_like(y_t))
+            scale_correction = torch.sum(log_scale, dim=-1)
+        else:
+            y_t = actions
+            scale_correction = torch.zeros(actions.shape[0], device=actions.device)
+
+        y_t = torch.clamp(y_t, -0.999999, 0.999999)
+        x_t = 0.5 * torch.log((1 + y_t) / (1 - y_t))
+
+        std = torch.exp(log_std)
+        normal_log_prob = -0.5 * (((x_t - mean) / std) ** 2 + 2.0 * log_std + _LOG_2PI)
+        normal_log_prob = torch.sum(normal_log_prob, dim=-1)
+
+        tanh_correction = torch.sum(torch.log(1 - y_t.pow(2) + 1e-7), dim=-1)
+        log_prob = normal_log_prob - tanh_correction - scale_correction
+        return log_prob / float(actions.shape[-1])
+
+    def _entropy_from_log_std(self, log_std):
+        return torch.sum(0.5 * (1.0 + _LOG_2PI) + log_std, dim=-1)
+
+    def sample(self, features, deterministic=False, return_stats=False):
         """Sample actions for inference.
 
         Uses CleanRL-style manual reparameterization to avoid issues with
@@ -228,16 +260,16 @@ class GaussianPolicy(nn.Module):
         Args:
             features: [B, input_dim]
             deterministic: Whether to use deterministic policy (mean).
+            return_stats: Whether to return (mean, log_std) for monitoring.
 
         Returns:
             action: [B, action_horizon, output_dim]
             log_prob: [B]
+            mean: [B, output_dim], optional
+            log_std: [B, output_dim], optional
         """
         # Get mean and log_std
-        h = self.shared_net(features)
-        mean = self.mean_layer(h)
-        log_std = self.log_std_layer(h)
-        log_std = torch.clamp(log_std, -20, 2)
+        mean, log_std = self._compute_mean_log_std(features)
         std = torch.exp(log_std)
 
         if deterministic:
@@ -252,33 +284,20 @@ class GaussianPolicy(nn.Module):
             # 2. Manually apply tanh
             # 3. Compute log_prob (with Jacobian correction)
 
-            # Create base Normal distribution (wrapped as multivariate via Independent)
+            # Create base Normal distribution
             normal = torch.distributions.Normal(mean, std)
-            base_dist = torch.distributions.Independent(normal, 1)
 
             # Sample from base distribution (pre-tanh space)
-            x_t = base_dist.rsample()  # [B, output_dim], supports gradient flow
+            x_t = normal.rsample()  # [B, output_dim], supports gradient flow
 
             # Manually apply tanh transform
             y_t = torch.tanh(x_t)  # [B, output_dim], in [-1, 1]
-
-            # Compute log_prob (CleanRL style)
-            # 1. Base distribution log_prob (in pre-tanh space)
-            # 2. Subtract Jacobian correction: log|det J| = sum(log(1 - y_i^2))
-            log_prob = base_dist.log_prob(x_t)  # [B], already summed
-            log_prob -= torch.sum(
-                torch.log(1 - y_t.pow(2) + 1e-7), dim=-1
-            )  # Jacobian correction
 
             # Optional: rescale to [low, high]
             if self.low is not None and self.high is not None:
                 scale_factor = (self.high - self.low) / 2.0
                 shift = (self.high + self.low) / 2.0
                 action = y_t * scale_factor + shift
-                # Subtract log(scale_factor) from log_prob
-                log_prob -= torch.sum(
-                    torch.log(torch.abs(scale_factor) * torch.ones_like(y_t)), dim=-1
-                )
             else:
                 action = y_t
 
@@ -288,9 +307,15 @@ class GaussianPolicy(nn.Module):
             1, self.action_horizon, 1
         )  # [B, action_horizon, output_dim]
 
-        return action, log_prob
+        if not deterministic:
+            log_prob = self._log_prob_from_stats(mean, log_std, action)
 
-    def evaluate_actions(self, features, actions):
+        if return_stats:
+            return action, log_prob, mean, log_std
+        else:
+             return action, log_prob
+
+    def evaluate_actions(self, features, actions, average_entropy=False):
         """Evaluate log_prob and entropy for given actions.
 
         Args:
@@ -301,17 +326,14 @@ class GaussianPolicy(nn.Module):
             log_prob: [B]
             entropy: [B]
         """
-        dist = self.forward(features)
-
         # If actions have action_horizon dimension, take the first timestep
         if actions.dim() == 3:
             actions = actions[:, 0, :]  # [B, output_dim]
 
-        # Compute log_prob (automatically includes Jacobian correction)
-        # With Independent wrapping, already summed, returns [B]
-        log_prob = dist.log_prob(actions)  # [B]
-
-        # Entropy: with Independent wrapping, already summed, returns [B]
-        entropy = dist.entropy()  # [B]
+        mean, log_std = self._compute_mean_log_std(features)
+        log_prob = self._log_prob_from_stats(mean, log_std, actions)
+        entropy = self._entropy_from_log_std(log_std)
+        if average_entropy:
+            entropy = entropy / float(actions.shape[-1])
 
         return log_prob, entropy

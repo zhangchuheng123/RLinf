@@ -16,7 +16,11 @@ export PYTHONPATH="${REPO_PATH}"
 export UV_PROJECT_ENVIRONMENT="${REPO_PATH}/.venv"
 export EMBODIED_PATH="${EMBODIED_PATH}"
 
-LOGGER_BACKENDS_OVERRIDE='runner.logger.logger_backends=[tensorboard]'
+if [[ "${WANDB_DISABLED:-}" == "true" || "${WANDB_DISABLED:-}" == "1" || "${DISABLE_WANDB:-}" == "true" || "${DISABLE_WANDB:-}" == "1" ]]; then
+  LOGGER_BACKENDS_OVERRIDE='runner.logger.logger_backends=[tensorboard]'
+else
+  LOGGER_BACKENDS_OVERRIDE='runner.logger.logger_backends=[tensorboard,wandb]'
+fi
 
 CONFIG_NAME="libero_10_dsrl_smolvla"
 MODEL_PATH="${REPO_PATH}/models/smolvla_libero"
