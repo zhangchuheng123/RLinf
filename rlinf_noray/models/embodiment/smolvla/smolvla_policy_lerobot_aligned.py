@@ -35,6 +35,7 @@ class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
 
     @torch.no_grad()
     def _extract_dsrl_state_features_from_batch(self, batch_obs: dict[str, Any]) -> torch.Tensor:
+        
         images, img_masks = self.policy.prepare_images(batch_obs)
         state = self.policy.prepare_state(batch_obs)
         lang_tokens = batch_obs["observation.language.tokens"]
@@ -47,10 +48,16 @@ class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
             lang_masks,
             state=state,
         )
+        # prefix_embs: [B, L=142, D=960]
+        # prefix_pad_masks: [B, L=142]
+        # prefix_att_masks: [B, L=142]
+
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+        # prefix_att_2d_masks: [B, L, L]
+        # prefix_position_ids: [B, L]
 
-        outputs_embeds, _ = self.policy.model.vlm_with_expert.forward(
+        outputs_embeds, past_key_values = self.policy.model.vlm_with_expert.forward(
             attention_mask=prefix_att_2d_masks,
             position_ids=prefix_position_ids,
             past_key_values=None,
@@ -59,10 +66,14 @@ class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
             fill_kv_cache=True,
         )
 
+        # outputs_embeds[0]: [B, L, D=960]
+        # past_key_values: list of 32 {'key_states'/'value_states': [B, L, 5, 64]}
+
         prefix_last_layer = outputs_embeds[0]
         last_token = prefix_last_layer[:, -1, :]
         last_layer_mean = prefix_last_layer.mean(dim=1)
         dsrl_features = torch.cat([last_token, last_layer_mean], dim=-1)
+
         return dsrl_features
 
     @torch.no_grad()
@@ -115,7 +126,7 @@ class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
         if "external_policy_noise" in kwargs:
             policy_noise = kwargs["external_policy_noise"]
 
-        dsrl_state_features = self._extract_dsrl_state_features_from_batch(batch_obs)
+        # dsrl_state_features = self._extract_dsrl_state_features_from_batch(batch_obs)
 
         action_norm, action_chunk = self.policy.select_action(
             batch_obs,
@@ -144,7 +155,7 @@ class SmolVLAForRLActionPrediction(BaseSmolVLAForRLActionPrediction):
             "timestep": timestep.detach().cpu(),
             "norm_actions": action_chunk.detach().cpu(),
             "states": states.cpu() if isinstance(states, torch.Tensor) else torch.as_tensor(states),
-            "dsrl_state_features": dsrl_state_features.detach().cpu(),
+            # "dsrl_state_features": dsrl_state_features.detach().cpu(),
             "main_images": env_obs[self.main_image_env_key].cpu(),
             "wrist_images": (
                 env_obs[self.wrist_image_env_key].cpu()

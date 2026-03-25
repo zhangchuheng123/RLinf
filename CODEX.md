@@ -194,8 +194,13 @@ RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" D
 
 # Q15
 
-我们现在需要来考虑 reset 相关的问题，目前 lerobot/envs/libero.py 中的 step 和 .venv/lib/python3.11/site-packages/gymnasium/vector/sync_vector_env.py 中的 step 都包含了 autoreset 逻辑。但是这其实不是我们想要的。我们希望不要重复 reset。
+我们现在需要来考虑 reset 相关的问题，目前 lerobot/envs/libero.py 中的 step 和 .venv/lib/python3.11/site-packages/gymnasium/vector/sync_vector_env.py 中的 step 都包含了 autoreset 逻辑。但是这其实不是我们想要的。我们希望的表现是，在 rlinf_noray/envs/libero/libero_env_lerobot_adapter.py 中的 chunk_step 过程中，如果遇到了 done := (terminated or truncated)，chunk 内的后续步不要再 step 了，append 各种空常量，等到 chunk 完全结束之后，对相应的环境进行 reset，并且把 reset 后的 obs 放在最后的 obs 中（这样后续的策略决策，可以根据这个 obs，在下一个新 episode 上做决策）。要实现这样的做法，应该做什么改动。注意，尽量只改动 rlinf_noray 中的代码，可以考虑少量改动 lerobot 上的代码，不要更高 .venv 上的代码。请先更有条理地复述我这里讲的逻辑，然后给出一个修改方案，暂时先不修改。
 
+注意：
+- 请用尽量少的修改完成任务，不要通过设置默认值和各种兜底来掩盖预期外的错误，有错误请让它及时抛出；
+- 调试中请禁用 wandb
+
+请这样实现：1）在 chunk_step 中调用 self.env.envs[i] 来手动 step，来绕过 SyncVectorEnv 中的 step，不过请注意对齐原本的行为；2）不用去除 LiberoEnv 中的 autoreset 逻辑， step 中 done 之后会自动 reset，这并没有问题，只不过需要把 observation 返回；3）接下来可以在 chunk_step 中实现前面描述的逻辑了。请按照这个思路修改代码。
 
 # Q16
 
@@ -268,3 +273,9 @@ RLINF_ROLLOUT_ALIGN_PICKLE_PATH="/home/chuheng/RLinf/logs/q12_align/align.pkl" D
 - 熵正则化 (coef=0.01)
 - 观测归一化
 ```
+
+# Q18
+
+基础信息：
+- rlinf 是作为参考的目录，不要引用和修改其中的内容；rlinf_noray（简称 noray）是主要的工作目录；lerobot 是辅助目录，可以可以修改其中内容，但尽量少改。
+- 请用尽量少的修改完成任务，不要通过设置默认值和各种兜底来掩盖预期外的错误，有错误请让它及时抛出；比如，不要使用 get('xxx', default)。
