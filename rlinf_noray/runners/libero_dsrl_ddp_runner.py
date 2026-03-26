@@ -1,5 +1,6 @@
 import copy
 import json
+import math
 import os
 from collections import deque
 from dataclasses import dataclass
@@ -34,10 +35,17 @@ class Transition:
     returns: float = 0.0
     advantage: float = 0.0
     value_target: float = 0.0
+    debug_frames: list[np.ndarray] | None = None
 
 
 class ReplayBuffer:
-    def __init__(self, capacity: int, num_envs: int, verbose: bool):
+    def __init__(
+        self,
+        capacity: int,
+        num_envs: int,
+        verbose: bool,
+        debug_video_enabled: bool = False,
+    ):
         assert capacity % num_envs == 0, (
             f"replay capacity={capacity} must be divisible by num_envs={num_envs}"
         )
@@ -48,7 +56,10 @@ class ReplayBuffer:
         self.data: list[Transition] = []
         self.env_queues: list[list[Transition]] = [[] for _ in range(num_envs)]
         self._pending_by_env: list[list[Transition]] = [[] for _ in range(num_envs)]
-        self._recent_success = deque(maxlen=20)
+        self._recent_success = deque(maxlen=100)
+        self.debug_video_enabled = debug_video_enabled
+        self._debug_completed_trajectories: list[list[Transition]] = []
+        self._debug_video_counter = 0
 
     def __len__(self) -> int:
         return len(self.data)
@@ -74,20 +85,93 @@ class ReplayBuffer:
             transition.returns = running_return
             transition.effective = True
 
+        if self.debug_video_enabled:
+            self._debug_completed_trajectories.append(list(trajectory))
+
         success = float(trajectory[-1].reward) > 0.0
         self._recent_success.append(1 if success else 0)
-        if self.verbose:
-            total = len(self._recent_success)
-            succ = int(sum(self._recent_success))
-            rate = (succ / float(total)) if total > 0 else 0.0
-            print(
-                (
-                    "[noray][dsrl][replay] "
-                    f"recent_success={succ}/{total} "
-                    f"success_rate={rate:.4f}"
-                ),
-                flush=True,
-            )
+
+    def recent_success_rate(self) -> float:
+        total = len(self._recent_success)
+        if total == 0:
+            return 0.0
+        return float(sum(self._recent_success)) / float(total)
+
+    @staticmethod
+    def _to_uint8_hwc(img: Any) -> np.ndarray:
+        if isinstance(img, torch.Tensor):
+            arr = img.detach().cpu().numpy()
+        else:
+            arr = np.asarray(img)
+
+        if arr.ndim == 3 and arr.shape[0] in (1, 3) and arr.shape[-1] not in (1, 3):
+            arr = np.transpose(arr, (1, 2, 0))
+
+        if arr.dtype != np.uint8:
+            arr = arr.astype(np.float32)
+            if arr.max() <= 1.0:
+                arr = arr * 255.0
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+
+        if arr.ndim == 2:
+            arr = np.stack([arr] * 3, axis=-1)
+        if arr.ndim == 3 and arr.shape[-1] == 1:
+            arr = np.repeat(arr, 3, axis=-1)
+        return arr
+
+    @staticmethod
+    def _annotate_debug_frame(
+        frame: np.ndarray,
+        traj_idx: int,
+        frame_idx: int,
+        success: bool,
+        reward: float,
+        ret: float,
+    ) -> np.ndarray:
+        image = Image.fromarray(np.flipud(ReplayBuffer._to_uint8_hwc(frame)).copy())
+        draw = ImageDraw.Draw(image)
+        font = ImageFont.load_default()
+        text = (
+            f"traj={traj_idx} frame={frame_idx} "
+            f"success={int(success)} reward={reward:.4f} return={ret:.4f}"
+        )
+        draw.text((8, 8), text, fill=(255, 255, 255), font=font)
+        return np.asarray(image)
+
+    def save_video(self) -> None:
+        if not self.debug_video_enabled or not self._debug_completed_trajectories:
+            return
+
+        out_frames: list[np.ndarray] = []
+        for traj_idx, trajectory in enumerate(self._debug_completed_trajectories):
+            if not trajectory:
+                continue
+
+            success = float(trajectory[-1].reward) > 0.0
+            for transition in trajectory:
+                frames = transition.debug_frames or []
+                if not frames:
+                    continue
+                reward = float(transition.reward)
+                ret = float(transition.returns)
+                for frame_idx, frame in enumerate(frames):
+                    out_frames.append(
+                        self._annotate_debug_frame(
+                            frame=frame,
+                            traj_idx=traj_idx,
+                            frame_idx=frame_idx,
+                            success=success,
+                            reward=reward,
+                            ret=ret,
+                        )
+                    )
+
+        if out_frames:
+            self._debug_video_counter += 1
+            out_file = f"debug_{self._debug_video_counter:04d}.mp4"
+            imageio.mimsave(out_file, out_frames, fps=1)
+
+        self._debug_completed_trajectories = []
 
     def add_rollout(self, transitions: list[Transition], gamma: float) -> None:
         for transition_idx, transition in enumerate(transitions):
@@ -381,13 +465,29 @@ class LiberoDSRLDDPNoRayRunner:
         self.entropy_coef = float(cfg.algorithm.dsrl_entropy_coef)
         self.grad_clip = float(cfg.actor.optim.clip_grad)
         self.minibatch_size = int(cfg.algorithm.dsrl_minibatch_size)
-        replay_capacity = int(cfg.algorithm.dsrl_replay_buffer_capacity)
-        assert replay_capacity > 0, f"algorithm.dsrl_replay_buffer_capacity must be > 0, got {replay_capacity}"
+        replay_capacity_in_epoch = float(cfg.algorithm.dsrl_replay_buffer_capacity_in_epoch)
+        assert replay_capacity_in_epoch > 0.0, (
+            "algorithm.dsrl_replay_buffer_capacity_in_epoch must be > 0, "
+            f"got {replay_capacity_in_epoch}"
+        )
+
+        transitions_per_epoch = self.local_num_envs * self.rollout_epoch * self.chunk_steps
+        replay_capacity = int(math.ceil(transitions_per_epoch * replay_capacity_in_epoch))
+        # ReplayBuffer requires capacity divisible by num_envs; round up to preserve requested horizon.
+        if replay_capacity % self.local_num_envs != 0:
+            replay_capacity = (
+                (replay_capacity + self.local_num_envs - 1) // self.local_num_envs
+            ) * self.local_num_envs
         assert self.minibatch_size > 0, f"algorithm.dsrl_minibatch_size must be > 0, got {self.minibatch_size}"
+        self.debug_replay_buffer_returns = os.getenv("DEBUG_REPLAY_BUFFER_RETURNS") is not None
+        self.debug_value_only = os.getenv("DEBUG_VALUE_ONLY") is not None
+        self._ref_value_running_mean = 0.0
+        self._ref_value_count = 0
         self.replay_buffer = ReplayBuffer(
             capacity=replay_capacity,
             num_envs=self.local_num_envs,
             verbose=self.rank == 0,
+            debug_video_enabled=self.debug_replay_buffer_returns and self.rank == 0,
         )
         # self.state_norm = RunningNorm(self.state_dim)
 
@@ -417,6 +517,8 @@ class LiberoDSRLDDPNoRayRunner:
                 "entropy_coef": self.entropy_coef,
                 "grad_clip": self.grad_clip,
                 "minibatch_size": self.minibatch_size,
+                "replay_capacity_in_epoch": replay_capacity_in_epoch,
+                "transitions_per_epoch": transitions_per_epoch,
                 "replay_capacity": replay_capacity,
                 "policy_noise_eps": self.policy_noise_eps,
                 "policy_noise_scale": self.policy_noise_scale,
@@ -425,6 +527,8 @@ class LiberoDSRLDDPNoRayRunner:
                 "save_rollout_video": self.save_rollout_video,
                 "eval_video_base_dir": self.eval_video_base_dir,
                 "rollout_video_base_dir": self.rollout_video_base_dir,
+                "debug_replay_buffer_returns": self.debug_replay_buffer_returns,
+                "debug_value_only": self.debug_value_only,
             }
             print(f"[noray][dsrl][init] {json.dumps(init_summary, sort_keys=True)}", flush=True)
 
@@ -544,7 +648,7 @@ class LiberoDSRLDDPNoRayRunner:
                 if terminated or truncated:
                     is_success = terminated and (not truncated)
                     print(
-                        f"[noray][ddp] Flushing video for env_idx={env_idx} terminated={terminated} truncated={truncated}",
+                        f"[noray][ddp] Flushing video for env_idx={env_idx} success={is_success}",
                     )
                     self._save_single_video(
                         frames=frames_by_env[env_idx],
@@ -666,6 +770,15 @@ class LiberoDSRLDDPNoRayRunner:
             obs_list, chunk_rewards, chunk_terminations, chunk_truncations, _ = env.chunk_step(chunk_actions)
             next_obs = obs_list[-1]
             next_dsrl_states = self.generator.extract_dsrl_state_features(next_obs).float()
+
+            chunk_debug_frames: list[list[np.ndarray]] = [[] for _ in range(dsrl_states.shape[0])]
+            if self.debug_replay_buffer_returns:
+                for step_obs in obs_list:
+                    main_images = step_obs.get("main_images")
+                    if main_images is None:
+                        continue
+                    for env_idx in range(dsrl_states.shape[0]):
+                        chunk_debug_frames[env_idx].append(self._to_uint8_hwc(main_images[env_idx]))
             # next_dsrl_states: [B, state_dim=960 * 2] (concat last token and mean-pooled)
             # self.state_norm.update(next_dsrl_states)
 
@@ -711,6 +824,7 @@ class LiberoDSRLDDPNoRayRunner:
                     old_logprob=old_logprob_cpu[idx].clone(),
                     reward=chunk_sum_rewards[idx].clone(),
                     done=dones[idx].clone(),
+                    debug_frames=chunk_debug_frames[idx] if self.debug_replay_buffer_returns else None,
                 )
                 transitions.append(transition)
 
@@ -811,6 +925,7 @@ class LiberoDSRLDDPNoRayRunner:
         metrics_acc = {
             "ppo_loss": 0.0,
             "value_loss": 0.0,
+            "ref_value_loss": 0.0,
             "entropy": 0.0,
             "ratio": 0.0,
             "clip_fraction": 0.0,
@@ -838,6 +953,15 @@ class LiberoDSRLDDPNoRayRunner:
                 device=self.device,
             )
 
+            batch_count = int(returns.numel())
+            batch_sum = float(returns.detach().sum().item())
+            total_count = self._ref_value_count + batch_count
+            if total_count > 0:
+                self._ref_value_running_mean = (
+                    self._ref_value_running_mean * float(self._ref_value_count) + batch_sum
+                ) / float(total_count)
+                self._ref_value_count = total_count
+
             norm_states = states.to(self.device)
             new_logprobs, entropy = self.actor.module.evaluate_actions(
                 norm_states,
@@ -860,13 +984,16 @@ class LiberoDSRLDDPNoRayRunner:
 
             value_pred = self.value_net(norm_states).float()
             value_loss = torch.nn.functional.mse_loss(value_pred, returns)
+            ref_value_pred = torch.full_like(returns, fill_value=float(self._ref_value_running_mean))
+            ref_value_loss = torch.nn.functional.mse_loss(ref_value_pred, returns)
 
             total_actor_loss = policy_loss + entropy_loss
 
-            self.actor_optimizer.zero_grad(set_to_none=True)
-            total_actor_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip)
-            self.actor_optimizer.step()
+            if not self.debug_value_only:
+                self.actor_optimizer.zero_grad(set_to_none=True)
+                total_actor_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip)
+                self.actor_optimizer.step()
 
             self.value_optimizer.zero_grad(set_to_none=True)
             value_loss.backward()
@@ -875,6 +1002,7 @@ class LiberoDSRLDDPNoRayRunner:
 
             metrics_acc["ppo_loss"] += float(policy_loss.detach().item())
             metrics_acc["value_loss"] += float(value_loss.detach().item())
+            metrics_acc["ref_value_loss"] += float(ref_value_loss.detach().item())
             metrics_acc["entropy"] += float(entropy.detach().mean().item())
             metrics_acc["ratio"] += float(ratio.detach().mean().item())
             metrics_acc["clip_fraction"] += float(clip_fraction.detach().item())
@@ -930,6 +1058,9 @@ class LiberoDSRLDDPNoRayRunner:
             )
 
             self.replay_buffer.add_rollout(transitions, gamma=self.gamma)
+            rollout_metrics["recent_success"] = self.replay_buffer.recent_success_rate()
+            if self.debug_replay_buffer_returns:
+                self.replay_buffer.save_video()
 
             ppo_metrics = self._ppo_update()
 
@@ -946,6 +1077,7 @@ class LiberoDSRLDDPNoRayRunner:
                     "rollout/success_rate": rollout_metrics["success_rate"],
                     "rollout/total_trajectories": rollout_metrics["total_trajectories"],
                     "rollout/success_trajectories": rollout_metrics["success_trajectories"],
+                    "rollout/recent_success": rollout_metrics["recent_success"],
                     "rollout/noise_latent_mean": rollout_metrics["noise_latent_mean"],
                     "rollout/noise_latent_std": rollout_metrics["noise_latent_std"],
                     "rollout/actor_mean_mean": rollout_metrics["actor_mean_mean"],

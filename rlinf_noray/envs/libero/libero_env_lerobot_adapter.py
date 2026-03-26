@@ -45,7 +45,6 @@ class LiberoEnv(gym.Env):
 
         self.seed = int(cfg.seed) + self.seed_offset
         self.auto_reset = bool(cfg.auto_reset)
-        self.ignore_terminations = bool(cfg.ignore_terminations)
         self.max_episode_steps = int(cfg.max_episode_steps)
 
         self._elapsed_steps = np.zeros(self.num_envs, dtype=np.int32)
@@ -214,10 +213,6 @@ class LiberoEnv(gym.Env):
         self._elapsed_steps[~is_skip] += 1
 
         infos_dict = dict(infos) if isinstance(infos, dict) else {}
-        if self.ignore_terminations:
-            infos_dict.setdefault("episode", {})
-            infos_dict["episode"]["success_at_end"] = to_tensor(terminations)
-            terminations = np.zeros_like(terminations, dtype=bool)
 
         dones = np.logical_or(terminations, truncations)
         self._elapsed_steps[dones] = 0

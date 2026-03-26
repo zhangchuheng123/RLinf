@@ -1,142 +1,184 @@
-defaults:
-  - env/libero_10@env.train
-  - env/libero_10@env.eval
-  - model/smolvla@actor.model
-  - training_backend/fsdp@actor.fsdp_config
-  - _self_
-  - override hydra/job_logging: stdout
-
 hydra:
   run:
-    dir: .
+    dir: . # Working directory for Hydra run outputs.
   job:
-    chdir: false
-  output_subdir: null
+    chdir: false # Keep current working directory unchanged.
+  output_subdir: null # Disable Hydra's per-run subdirectory under .hydra.
   searchpath:
-    - file://${oc.env:EMBODIED_PATH}/config/
+    - file://${oc.env:EMBODIED_PATH}/config/ # Extra Hydra config search path (kept for compatibility).
 
 cluster:
-  num_nodes: 1
+  num_nodes: 1 # Number of nodes used by this run.
   component_placement:
-    actor,env,rollout: all
+    actor,env,rollout: all # Place actor/env/rollout on all available nodes.
 
 runner:
-  task_type: embodied
+  task_type: embodied # Runner task category.
   logger:
-    log_path: "../results"
-    project_name: rlinf
-    experiment_name: "libero_10_dsrl_smolvla"
-    logger_backends: ["tensorboard"]
+    log_path: "../results" # Root directory for logs/checkpoints/videos.
+    project_name: rlinf # Project name used by logging backends.
+    experiment_name: "libero_10_dsrl_smolvla" # Experiment/run name.
+    logger_backends: ["tensorboard"] # Enabled logging backends.
 
-  max_epochs: 1000
-  max_steps: -1
+  max_epochs: 1000 # Total training epochs.
+  max_steps: -1 # Global step cap (-1 means disabled).
 
-  only_eval: False
-  val_check_interval: 1
-  save_interval: 40
-  save_eval_video: False
-  save_rollout_video: False
-  num_execute_steps: 4
-  eval_video_base_dir: ${runner.logger.log_path}/video/eval
-  rollout_video_base_dir: ${runner.logger.log_path}/video/rollout
+  only_eval: False # If true, run evaluation only and skip training.
+  val_check_interval: 1 # Evaluate every N epochs.
+  save_interval: 40 # Checkpoint save interval.
+  save_eval_video: True # Save evaluation trajectory videos in runner.
+  save_rollout_video: False # Save training rollout videos in runner.
+  num_execute_steps: 4 # Number of action steps executed from each predicted chunk.
+  eval_video_base_dir: ${runner.logger.log_path}/video/eval # Eval video output directory.
+  rollout_video_base_dir: ${runner.logger.log_path}/video/rollout # Train rollout video output directory.
 
-  resume_dir: null
-  ckpt_path: null
+  resume_dir: null # Checkpoint directory to resume from.
+  ckpt_path: null # Explicit checkpoint path.
 
 wandb:
-  key: "local-fb872608a0ec758c86ab35d24eec1373fe2d9313"
-  host: "https://microsoft-research.wandb.io"
-  entity: msra_rl
-  project: rlinf
-  run: ${runner.logger.experiment_name}
+  key: "local-fb872608a0ec758c86ab35d24eec1373fe2d9313" # W&B API key.
+  host: "https://microsoft-research.wandb.io" # W&B host/base URL.
+  entity: msra_rl # W&B entity/team.
+  project: rlinf # W&B project.
+  run: ${runner.logger.experiment_name} # W&B run name.
 
 algorithm:
-  rollout_epoch: 8
-  eval_rollout_epoch: 1
-  update_epoch: 10
-  dsrl_minibatch_size: 1024
-  dsrl_replay_buffer_capacity: 3000
+  rollout_epoch: 2 # Number of rollout loops per epoch.
+  eval_rollout_epoch: 1 # Number of evaluation rollout loops.
+  update_epoch: 10 # PPO optimization passes per epoch.
+  dsrl_minibatch_size: 2048 # Mini-batch size for DSRL PPO updates.
+  dsrl_replay_buffer_capacity_in_epoch: 1.2 # Replay capacity = transitions_per_epoch * this multiplier.
 
-  gamma: 0.99
-  gae_lambda: 0.95
+  gamma: 0.99 # Discount factor.
+  gae_lambda: 0.95 # GAE lambda.
 
-  dsrl_ppo_clip: 0.2
-  dsrl_max_log_ratio: 20.0
-  dsrl_entropy_coef: 0.01
+  dsrl_ppo_clip: 0.2 # PPO clipping range.
+  dsrl_max_log_ratio: 20.0 # Clamp range for log ratio before exp.
+  dsrl_entropy_coef: 0.01 # Entropy regularization coefficient.
 
 env:
-  group_name: "EnvGroup"
+  group_name: "EnvGroup" # Logical env component group name.
 
   train:
-    total_num_envs: 16
-    max_episode_steps: 512
-    max_steps_per_rollout_epoch: 240
-  eval:
-    total_num_envs: 10
-    auto_reset: True
-    ignore_terminations: True
-    max_episode_steps: 512
-    max_steps_per_rollout_epoch: 240
-    group_size: 1
-    use_fixed_reset_state_ids: True
-    is_eval: True
+    env_type: libero # Environment type resolver key.
+    task_suite_name: libero_10 # LIBERO task suite.
+    total_num_envs: 2 # Total train env instances across all ranks.
+    auto_reset: False # Whether env auto-resets at termination.
+    max_steps_per_rollout_epoch: 512 # Per-epoch env interaction budget (in steps).
+    max_episode_steps: 512 # Episode horizon for truncation.
+    use_fixed_reset_state_ids: True # Kept for compatibility; not consumed in no-ray DSRL runner.
+    use_ordered_reset_state_ids: False # Kept for compatibility; not consumed in no-ray DSRL runner.
+    specific_task_id: null # Optional fixed LIBERO task id override.
+    use_rel_reward: True # Kept for compatibility; not consumed in no-ray DSRL runner.
+    reward_coef: 5.0 # Kept for compatibility; not consumed in no-ray DSRL runner.
+    reset_gripper_open: True # Kept for compatibility; not consumed in no-ray DSRL runner.
+    is_eval: False # Train mode flag for env-side logic.
+    seed: 0 # Base random seed.
+    group_size: 1 # Env group size used by some env-worker pipelines.
+    init_params:
+      camera_heights: 256 # Camera height used when creating LIBERO env.
+      camera_widths: 256 # Camera width used when creating LIBERO env.
     video_cfg:
-      save_eval_video: False
-      video_base_dir: ${runner.logger.log_path}/video/eval
+      save_video: True # Kept for compatibility with wrapped env-worker video recorder.
+      info_on_video: True # Kept for compatibility with wrapped env-worker video recorder.
+      video_base_dir: ${runner.logger.log_path}/video/train # Train env video directory.
+
+  eval:
+    env_type: libero # Environment type resolver key.
+    task_suite_name: libero_10 # LIBERO task suite.
+    total_num_envs: 2 # Total eval env instances across all ranks.
+    auto_reset: True # Auto-reset completed eval episodes.
+    max_steps_per_rollout_epoch: 512 # Eval interaction budget per eval run.
+    max_episode_steps: 512 # Episode horizon for truncation.
+    use_fixed_reset_state_ids: True # Keep eval starts deterministic when supported.
+    use_ordered_reset_state_ids: False # Kept for compatibility; not consumed in no-ray DSRL runner.
+    specific_task_id: null # Optional fixed LIBERO task id override.
+    use_rel_reward: True # Kept for compatibility; not consumed in no-ray DSRL runner.
+    reward_coef: 5.0 # Kept for compatibility; not consumed in no-ray DSRL runner.
+    reset_gripper_open: True # Kept for compatibility; not consumed in no-ray DSRL runner.
+    is_eval: True # Eval mode flag for env-side logic.
+    seed: 0 # Base random seed.
+    group_size: 1 # Env group size used by some env-worker pipelines.
+    init_params:
+      camera_heights: 256 # Camera height used when creating LIBERO env.
+      camera_widths: 256 # Camera width used when creating LIBERO env.
+    video_cfg:
+      save_eval_video: False # Eval video switch for env-level recorder wrappers.
+      video_base_dir: ${runner.logger.log_path}/video/eval # Eval env video directory.
 
 rollout:
-  group_name: "RolloutGroup"
-  generation_backend: "huggingface"
-  recompute_logprobs: False
-  enable_offload: False
-  pipeline_stage_num: 1
+  group_name: "RolloutGroup" # Logical rollout component group name.
+  generation_backend: "huggingface" # Rollout backend type.
+  recompute_logprobs: False # Whether rollout recomputes action logprobs.
+  enable_offload: False # Whether rollout model offload is enabled.
+  pipeline_stage_num: 1 # Number of rollout pipeline stages.
 
   model:
-    model_path: "/path/to/model/SmolVLA-LIBERO-SFT"
-    precision: ${actor.model.precision}
+    model_path: "/path/to/model/SmolVLA-LIBERO-SFT" # Rollout model checkpoint path.
+    precision: ${actor.model.precision} # Rollout model precision.
 
 actor:
-  group_name: "ActorGroup"
-  training_backend: "ddp"
-  micro_batch_size: 16
-  global_batch_size: 128
-  seed: 42
-  enable_offload: False
+  group_name: "ActorGroup" # Logical actor component group name.
+  training_backend: "ddp" # Actor training backend.
+  micro_batch_size: 16 # Per-device micro batch size.
+  global_batch_size: 128 # Global batch size target.
+  seed: 42 # Actor seed.
+  enable_offload: False # Whether actor parameter offload is enabled.
 
   model:
-    model_path: "/path/to/model/SmolVLA-LIBERO-SFT"
-    model_type: "smolvla"
-    add_value_head: True
-    state_dim: 8
-    dsrl_noise_dim: 1600
-    dsrl_hidden_dim: 256
-    policy_noise_eps: 1.0e-6
-    policy_noise_scale: 1.0
-    policy_noise_bias: 0.0
+    model_path: "/path/to/model/SmolVLA-LIBERO-SFT" # Actor model checkpoint path.
+    model_type: "smolvla" # Model registry key.
+    precision: "bf16" # Model compute dtype used by get_model().
+    is_lora: False # Whether to enable LoRA wrapping.
+    action_dim: 7 # Single-step action dimension.
+    num_action_chunks: 16 # Action chunk length produced per forward call.
+    add_value_head: True # Enable value head in wrapped policy.
+    state_dim: 8 # State feature dimension for value head / DSRL settings.
+    image_keys: ["image", "image2"] # Camera key suffixes for observation.images.*.
+    main_image_env_key: "main_images" # Env observation key for the main camera.
+    wrist_image_env_key: "wrist_images" # Env observation key for the wrist camera.
+    dsrl_noise_dim: 1600 # DSRL latent noise dimension (must match chunk_size*max_action_dim).
+    dsrl_hidden_dim: 256 # Hidden size of DSRL Gaussian actor/value MLP.
+    policy_noise_eps: 1.0e-6 # Clamp epsilon before atanh in latent->policy noise mapping.
+    policy_noise_scale: 1.0 # Scale applied in latent->policy noise mapping.
+    policy_noise_bias: 0.0 # Bias applied in latent->policy noise mapping.
 
   optim:
-    lr: 5.0e-6
-    dsrl_actor_lr: 1.0e-5
-    dsrl_value_lr: 2.0e-5
-    adam_beta1: 0.9
-    adam_beta2: 0.95
-    adam_eps: 1.0e-08
-    weight_decay: 0.01
-    clip_grad: 1.0
+    lr: 5.0e-6 # Generic learning rate (kept for compatibility).
+    dsrl_actor_lr: 1.0e-5 # DSRL actor optimizer learning rate.
+    dsrl_value_lr: 2.0e-5 # DSRL value optimizer learning rate.
+    adam_beta1: 0.9 # Adam beta1.
+    adam_beta2: 0.95 # Adam beta2.
+    adam_eps: 1.0e-08 # Adam epsilon.
+    weight_decay: 0.01 # AdamW weight decay.
+    clip_grad: 1.0 # Gradient clipping norm threshold.
 
   fsdp_config:
-    strategy: "fsdp"
-    sharding_strategy: "no_shard"
-    disable: True
-    use_orig_params: True
-    gradient_checkpointing: False
+    strategy: "fsdp" # Distributed strategy selector.
+    sharding_strategy: "no_shard" # Parameter/gradient sharding mode.
+    disable: True # Disable FSDP in this DDP no-ray setup.
+    gradient_checkpointing: False # Enable/disable activation checkpointing.
+    cpu_offload: False # Offload parameters/gradients to CPU.
+    offload_pin_memory: False # Pin memory for CPU offload.
+    reshard_after_forward: True # Reshard parameters after forward in FSDP2 modes.
+    enable_gradient_accumulation: True # Enable gradient accumulation semantics.
+    forward_prefetch: False # Enable FSDP forward prefetch.
+    limit_all_gathers: False # Limit concurrent all-gather ops.
+    backward_prefetch: null # Backward prefetch policy (null/pre/post).
+    use_orig_params: True # Expose original parameters instead of FlatParameter.
+    use_liger_kernel: False # Enable liger kernel optimizations where supported.
+    fsdp_size: -1 # GPUs per FSDP group (-1 means all available).
     mixed_precision:
-      param_dtype: ${actor.model.precision}
-      reduce_dtype: ${actor.model.precision}
-      buffer_dtype: ${actor.model.precision}
+      param_dtype: ${actor.model.precision} # Parameter dtype in mixed precision mode.
+      reduce_dtype: ${actor.model.precision} # Gradient reduction dtype.
+      buffer_dtype: ${actor.model.precision} # Buffer dtype.
+    amp:
+      enabled: False # Enable AMP wrapper logic.
+      precision: "bf16" # AMP precision type.
+      use_grad_scaler: False # Enable gradient scaler for AMP.
 
 reward:
-  use_reward_model: False
+  use_reward_model: False # Whether to use a separate reward model.
 
 critic:
-  use_critic_model: False
+  use_critic_model: False # Whether to use a separate critic model component.
