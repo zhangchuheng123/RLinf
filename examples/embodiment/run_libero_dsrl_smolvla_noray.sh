@@ -28,9 +28,10 @@ MODEL_PATH="${REPO_PATH}/models/smolvla_libero"
 GPU_COUNT="$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)"
 NPROC_PER_NODE="${NPROC_PER_NODE:-${GPU_COUNT}}"
 
-TRAIN_ENVS="${TRAIN_ENVS:-16}"
-EVAL_ENVS="${EVAL_ENVS:-16}"
+TRAIN_ENVS="${TRAIN_ENVS:-8}"
+EVAL_ENVS="${EVAL_ENVS:-8}"
 NUM_EXECUTE_STEPS="${NUM_EXECUTE_STEPS:-4}"
+DSRL_VALUE_HEAD_TYPE="${DSRL_VALUE_HEAD_TYPE:-scalar}"
 SAVE_EVAL_VIDEO="${SAVE_EVAL_VIDEO:-True}"
 SAVE_ROLLOUT_VIDEO="${SAVE_ROLLOUT_VIDEO:-False}"
 LOG_DIR="${LOG_DIR:-${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}_noray}"
@@ -44,6 +45,12 @@ if [[ -n "${WANDB_RUNNAME_SUFFIX}" ]]; then
 else
   WANDB_RUN="${WANDB_RUN_BASE}"
 fi
+
+if [[ "${DSRL_VALUE_HEAD_TYPE}" != "scalar" && "${DSRL_VALUE_HEAD_TYPE}" != "distributional" ]]; then
+  echo "DSRL_VALUE_HEAD_TYPE must be either 'scalar' or 'distributional', got: ${DSRL_VALUE_HEAD_TYPE}" >&2
+  exit 1
+fi
+
 mkdir -p "${LOG_DIR}"
 
 HYDRA_OVERRIDES=(
@@ -60,6 +67,7 @@ HYDRA_OVERRIDES=(
   "runner.rollout_video_base_dir=${ROLLOUT_VIDEO_BASE_DIR}"
   "env.eval.video_cfg.save_eval_video=${SAVE_EVAL_VIDEO}"
   "env.eval.video_cfg.video_base_dir=${EVAL_VIDEO_BASE_DIR}"
+  "actor.model.dsrl_value_head_type=${DSRL_VALUE_HEAD_TYPE}"
   "actor.training_backend=ddp"
   "actor.fsdp_config.disable=True"
   "${LOGGER_BACKENDS_OVERRIDE}"

@@ -15,6 +15,16 @@ class DummyValueModel(torch.nn.Module):
         return states[:, 0]
 
 
+class DummyDistributionalLikeValueModel(torch.nn.Module):
+    def forward(self, states: torch.Tensor) -> torch.Tensor:
+        first = states[:, 0]
+        second = states[:, 0] + 1.0
+        return torch.stack([first, second], dim=-1)
+
+    def predict_value_from_output(self, output: torch.Tensor) -> torch.Tensor:
+        return output[:, 0]
+
+
 def _make_transition(
     state: float,
     next_state: float,
@@ -90,3 +100,23 @@ def test_replay_buffer_gae_targets_and_sampling_only_use_effective_entries() -> 
     batch = buffer.sample(batch_size=16)
     assert len(batch) == 16
     assert all(transition.effective for transition in batch)
+
+
+def test_replay_buffer_gae_targets_support_predict_value_interface() -> None:
+    buffer = ReplayBuffer(capacity=4, num_envs=1, verbose=False)
+
+    transitions = [
+        _make_transition(0.5, 1.5, 0.0, -0.1, 1.0, False),
+        _make_transition(1.5, 2.5, 0.0, -0.1, 2.0, True),
+    ]
+    buffer.add_rollout(transitions, gamma=0.99)
+
+    prepared = buffer.prepare_gae_targets(
+        value_model=DummyDistributionalLikeValueModel(),
+        device=torch.device("cpu"),
+        gamma=0.99,
+        gae_lambda=0.95,
+    )
+
+    assert prepared == 2
+    assert all(transition.effective for transition in buffer.data)

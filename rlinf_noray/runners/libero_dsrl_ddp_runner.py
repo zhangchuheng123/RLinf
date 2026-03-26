@@ -209,8 +209,8 @@ class ReplayBuffer:
         next_states = torch.stack([entry.next_state for entry in effective_entries], dim=0).to(device)
 
         with torch.no_grad():
-            values = value_model(states).float().detach().cpu()
-            next_values = value_model(next_states).float().detach().cpu()
+            values = _predict_values(value_model, states).detach().cpu()
+            next_values = _predict_values(value_model, next_states).detach().cpu()
 
         next_value_by_id: dict[int, float] = {}
         for index, entry in enumerate(effective_entries):
@@ -283,7 +283,7 @@ class RunningNorm:
         return (x.float() - mean) / std
 
 
-class DSRLValueNet(torch.nn.Module):
+class DSRLScalarValueNet(torch.nn.Module):
     def __init__(self, state_dim: int, hidden_dim: int = 256):
         super().__init__()
         self.net = torch.nn.Sequential(
@@ -297,11 +297,116 @@ class DSRLValueNet(torch.nn.Module):
     def forward(self, states: torch.Tensor) -> torch.Tensor:
         return self.net(states).squeeze(-1)
 
+    def predict_value_from_output(self, output: torch.Tensor) -> torch.Tensor:
+        return output.float()
+
+    def predict_value(self, states: torch.Tensor) -> torch.Tensor:
+        return self.predict_value_from_output(self.forward(states))
+
+    def compute_loss_from_output(
+        self,
+        output: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> torch.Tensor:
+        return torch.nn.functional.mse_loss(output.float(), targets.float())
+
+    def compute_loss(self, states: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return self.compute_loss_from_output(self.forward(states), targets)
+
+
+class DSRLDistributionalValueNet(torch.nn.Module):
+    def __init__(
+        self,
+        state_dim: int,
+        hidden_dim: int = 256,
+        v_min: float = 0.0,
+        v_max: float = 1.0,
+        n_bins: int = 16,
+    ):
+        super().__init__()
+        if n_bins <= 1:
+            raise ValueError(f"n_bins must be > 1, got {n_bins}")
+        if v_max <= v_min:
+            raise ValueError(f"v_max must be > v_min, got v_min={v_min}, v_max={v_max}")
+
+        self.v_min = float(v_min)
+        self.v_max = float(v_max)
+        self.n_bins = int(n_bins)
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(state_dim, hidden_dim),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_dim, hidden_dim),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_dim, n_bins),
+        )
+        self.register_buffer(
+            "bin_centers",
+            torch.linspace(self.v_min, self.v_max, self.n_bins, dtype=torch.float32),
+            persistent=False,
+        )
+
+    def forward(self, states: torch.Tensor) -> torch.Tensor:
+        return self.net(states)
+
+    def clamp_targets(self, targets: torch.Tensor) -> torch.Tensor:
+        return targets.float().clamp(min=self.v_min, max=self.v_max)
+
+    def target_to_bin_indices(self, targets: torch.Tensor) -> torch.Tensor:
+        clamped = self.clamp_targets(targets)
+        distances = torch.abs(clamped.unsqueeze(-1) - self.bin_centers.unsqueeze(0))
+        return torch.argmin(distances, dim=-1)
+
+    def predict_value_from_output(self, output: torch.Tensor) -> torch.Tensor:
+        probs = torch.softmax(output.float(), dim=-1)
+        return torch.sum(probs * self.bin_centers.unsqueeze(0), dim=-1)
+
+    def predict_value(self, states: torch.Tensor) -> torch.Tensor:
+        return self.predict_value_from_output(self.forward(states))
+
+    def compute_loss_from_output(
+        self,
+        output: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> torch.Tensor:
+        target_bins = self.target_to_bin_indices(targets)
+        return torch.nn.functional.cross_entropy(output.float(), target_bins)
+
+    def compute_loss(self, states: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return self.compute_loss_from_output(self.forward(states), targets)
+
 
 def _to_tensor_states(states: Any) -> torch.Tensor:
     if isinstance(states, torch.Tensor):
         return states.detach().cpu().float()
     return torch.as_tensor(states, dtype=torch.float32)
+
+
+def _unwrap_value_model(value_model: torch.nn.Module) -> torch.nn.Module:
+    return value_model.module if hasattr(value_model, "module") else value_model
+
+
+def _predict_values(value_model: torch.nn.Module, states: torch.Tensor) -> torch.Tensor:
+    raw_output = value_model(states)
+    model = _unwrap_value_model(value_model)
+    if hasattr(model, "predict_value_from_output"):
+        return model.predict_value_from_output(raw_output).float()
+    if hasattr(model, "predict_value"):
+        return model.predict_value(states).float()
+    return raw_output.float()
+
+
+def _compute_value_loss(
+    value_model: torch.nn.Module,
+    states: torch.Tensor,
+    targets: torch.Tensor,
+) -> torch.Tensor:
+    raw_output = value_model(states)
+    model = _unwrap_value_model(value_model)
+    if hasattr(model, "compute_loss_from_output"):
+        return model.compute_loss_from_output(raw_output, targets)
+    if hasattr(model, "compute_loss"):
+        return model.compute_loss(states, targets)
+    return torch.nn.functional.mse_loss(raw_output.float(), targets.float())
 
 
 def _reduce_mean_dict(metrics: dict[str, float], device: torch.device) -> dict[str, float]:
@@ -407,6 +512,10 @@ class LiberoDSRLDDPNoRayRunner:
         self.max_action_dim = int(self.generator.policy.config.max_action_dim)
         self.dsrl_noise_dim = self.chunk_size * self.max_action_dim
         self.dsrl_hidden_dim = int(cfg.actor.model.dsrl_hidden_dim)
+        self.dsrl_value_head_type = str(cfg.actor.model.get("dsrl_value_head_type", "scalar")).lower()
+        self.dsrl_value_v_min = float(cfg.actor.model.get("dsrl_value_v_min", 0.0))
+        self.dsrl_value_v_max = float(cfg.actor.model.get("dsrl_value_v_max", 1.0))
+        self.dsrl_value_n_bins = int(cfg.actor.model.get("dsrl_value_n_bins", 16))
         if not hasattr(self.generator, "get_dsrl_state_dim"):
             raise AttributeError("SmolVLA aligned policy must implement get_dsrl_state_dim() for DSRL")
         self.state_dim = int(self.generator.get_dsrl_state_dim())
@@ -428,7 +537,24 @@ class LiberoDSRLDDPNoRayRunner:
             hidden_dims=(self.dsrl_hidden_dim, self.dsrl_hidden_dim, self.dsrl_hidden_dim),
             action_horizon=1,
         )
-        self.value_net = DSRLValueNet(self.state_dim, hidden_dim=self.dsrl_hidden_dim)
+        if self.dsrl_value_head_type == "scalar":
+            self.value_net = DSRLScalarValueNet(
+                self.state_dim,
+                hidden_dim=self.dsrl_hidden_dim,
+            )
+        elif self.dsrl_value_head_type == "distributional":
+            self.value_net = DSRLDistributionalValueNet(
+                self.state_dim,
+                hidden_dim=self.dsrl_hidden_dim,
+                v_min=self.dsrl_value_v_min,
+                v_max=self.dsrl_value_v_max,
+                n_bins=self.dsrl_value_n_bins,
+            )
+        else:
+            raise ValueError(
+                "actor.model.dsrl_value_head_type must be either 'scalar' or 'distributional', "
+                f"got {self.dsrl_value_head_type}"
+            )
 
         self.actor.to(self.device)
         self.value_net.to(self.device)
@@ -508,6 +634,10 @@ class LiberoDSRLDDPNoRayRunner:
                 "state_dim": self.state_dim,
                 "dsrl_noise_dim": self.dsrl_noise_dim,
                 "dsrl_hidden_dim": self.dsrl_hidden_dim,
+                "dsrl_value_head_type": self.dsrl_value_head_type,
+                "dsrl_value_v_min": self.dsrl_value_v_min,
+                "dsrl_value_v_max": self.dsrl_value_v_max,
+                "dsrl_value_n_bins": self.dsrl_value_n_bins,
                 "actor_lr": actor_lr,
                 "value_lr": value_lr,
                 "gamma": self.gamma,
@@ -982,8 +1112,8 @@ class LiberoDSRLDDPNoRayRunner:
             policy_loss = - torch.min(ratio * advantages, clipped_ratio * advantages).mean()
             entropy_loss = - self.entropy_coef * entropy.mean()
 
-            value_pred = self.value_net(norm_states).float()
-            value_loss = torch.nn.functional.mse_loss(value_pred, returns)
+            value_pred = _predict_values(self.value_net, norm_states)
+            value_loss = _compute_value_loss(self.value_net, norm_states, returns)
             ref_value_pred = torch.full_like(returns, fill_value=float(self._ref_value_running_mean))
             ref_value_loss = torch.nn.functional.mse_loss(ref_value_pred, returns)
 
