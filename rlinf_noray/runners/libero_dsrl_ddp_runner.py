@@ -630,6 +630,8 @@ class LiberoDSRLDDPNoRayRunner:
         self.eval_video_base_dir = str(cfg.runner.eval_video_base_dir)
         self.rollout_video_base_dir = str(cfg.runner.rollout_video_base_dir)
         self._video_traj_counter = self.rank * 1_000_000
+        self._train_obs: dict[str, Any] | None = None
+        self._train_dsrl_states: torch.Tensor | None = None
 
         if self.rank == 0:
             init_summary = {
@@ -668,9 +670,6 @@ class LiberoDSRLDDPNoRayRunner:
                 "debug_value_only": self.debug_value_only,
             }
             print(f"[noray][dsrl][init] {json.dumps(init_summary, sort_keys=True)}", flush=True)
-
-            self._train_obs: dict[str, Any] | None = None
-            self._train_dsrl_states: torch.Tensor | None = None
 
     @staticmethod
     def _to_uint8_hwc(img: Any) -> np.ndarray:
@@ -818,6 +817,25 @@ class LiberoDSRLDDPNoRayRunner:
                 average_entropy=True,
             )
         return noise, logprob.float(), entropy.float(), actor_mean.float(), actor_logstd.float()
+
+    def _evaluate_actions_ddp(
+        self,
+        features: torch.Tensor,
+        actions: torch.Tensor,
+        average_entropy: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Evaluate actions via DDP wrapper forward so actor gradients synchronize correctly."""
+        if actions.dim() == 3:
+            actions = actions[:, 0, :]
+
+        distribution = self.actor(features)
+        action_dim = float(max(int(actions.shape[-1]), 1))
+
+        log_prob = distribution.log_prob(actions) / action_dim
+        entropy = distribution.base_dist.entropy()
+        if average_entropy:
+            entropy = entropy / action_dim
+        return log_prob.float(), entropy.float()
 
     def _noise_to_policy_noise(self, noise_latent: torch.Tensor) -> torch.Tensor:
         latent = torch.clamp(noise_latent, -1.0 + self.policy_noise_eps, 1.0 - self.policy_noise_eps)
@@ -977,18 +995,45 @@ class LiberoDSRLDDPNoRayRunner:
         stats = stats.to(self.device)
         dist.all_reduce(stats, op=dist.ReduceOp.SUM)
 
+        rollout_aux_stats = torch.tensor(
+            [
+                noise_sum,
+                noise_sq_sum,
+                float(noise_count),
+                actor_mean_sum,
+                actor_mean_sq_sum,
+                actor_logstd_sum,
+                actor_logstd_sq_sum,
+                float(actor_stat_count),
+            ],
+            dtype=torch.float64,
+            device=self.device,
+        )
+        dist.all_reduce(rollout_aux_stats, op=dist.ReduceOp.SUM)
+
+        noise_sum = float(rollout_aux_stats[0].item())
+        noise_sq_sum = float(rollout_aux_stats[1].item())
+        noise_count = int(rollout_aux_stats[2].item())
+        actor_mean_sum = float(rollout_aux_stats[3].item())
+        actor_mean_sq_sum = float(rollout_aux_stats[4].item())
+        actor_logstd_sum = float(rollout_aux_stats[5].item())
+        actor_logstd_sq_sum = float(rollout_aux_stats[6].item())
+        actor_stat_count = int(rollout_aux_stats[7].item())
+
         done_count = max(float(stats[2].item()), 1.0)
         step_count = max(float(stats[1].item()), 1.0)
-        noise_mean = noise_sum / float(max(noise_count, 1))
-        noise_var = max(noise_sq_sum / float(max(noise_count, 1)) - noise_mean * noise_mean, 0.0)
-        actor_mean_mean = actor_mean_sum / float(max(actor_stat_count, 1))
+        noise_denom = float(max(noise_count, 1))
+        actor_stat_denom = float(max(actor_stat_count, 1))
+        noise_mean = noise_sum / noise_denom
+        noise_var = max(noise_sq_sum / noise_denom - noise_mean * noise_mean, 0.0)
+        actor_mean_mean = actor_mean_sum / actor_stat_denom
         actor_mean_var = max(
-            actor_mean_sq_sum / float(max(actor_stat_count, 1)) - actor_mean_mean * actor_mean_mean,
+            actor_mean_sq_sum / actor_stat_denom - actor_mean_mean * actor_mean_mean,
             0.0,
         )
-        actor_logstd_mean = actor_logstd_sum / float(max(actor_stat_count, 1))
+        actor_logstd_mean = actor_logstd_sum / actor_stat_denom
         actor_logstd_var = max(
-            actor_logstd_sq_sum / float(max(actor_stat_count, 1))
+            actor_logstd_sq_sum / actor_stat_denom
             - actor_logstd_mean * actor_logstd_mean,
             0.0,
         )
@@ -1050,6 +1095,7 @@ class LiberoDSRLDDPNoRayRunner:
 
     def _ppo_update(self) -> dict[str, float]:
 
+        # Replay buffer is intentionally rank-local to keep data collection and PPO updates independent per rank.
         effective_count = self.replay_buffer.prepare_gae_targets(
             value_model=self.value_net,
             device=self.device,
@@ -1058,22 +1104,6 @@ class LiberoDSRLDDPNoRayRunner:
         )
         if effective_count == 0:
             return {}
-
-        # Optional value-only pre-updates before each standard PPO update block.
-        for _ in range(self.pre_value_update_epoch):
-            batch = self.replay_buffer.sample(self.minibatch_size)
-            states = torch.stack([transition.state for transition in batch], dim=0).to(self.device)
-            returns = torch.tensor(
-                [transition.value_target for transition in batch],
-                dtype=torch.float32,
-                device=self.device,
-            )
-
-            value_loss = _compute_value_loss(self.value_net, states, returns)
-            self.value_optimizer.zero_grad(set_to_none=True)
-            value_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.value_net.parameters(), self.grad_clip)
-            self.value_optimizer.step()
 
         metrics_acc = {
             "ppo_loss": 0.0,
@@ -1094,6 +1124,22 @@ class LiberoDSRLDDPNoRayRunner:
         if self.dsrl_value_head_type == "distributional":
             metrics_acc["value_ce_loss"] = 0.0
         updates = 0
+
+        # Optional value-only pre-updates before each standard PPO update block.
+        for _ in range(self.pre_value_update_epoch):
+            batch = self.replay_buffer.sample(self.minibatch_size)
+            states = torch.stack([transition.state for transition in batch], dim=0).to(self.device)
+            returns = torch.tensor(
+                [transition.value_target for transition in batch],
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            value_loss = _compute_value_loss(self.value_net, states, returns)
+            self.value_optimizer.zero_grad(set_to_none=True)
+            value_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.value_net.parameters(), self.grad_clip)
+            self.value_optimizer.step()
 
         for _ in range(self.update_epoch):
             batch = self.replay_buffer.sample(self.minibatch_size)
@@ -1126,7 +1172,7 @@ class LiberoDSRLDDPNoRayRunner:
                 self._ref_value_count = total_count
 
             norm_states = states.to(self.device)
-            new_logprobs, entropy = self.actor.module.evaluate_actions(
+            new_logprobs, entropy = self._evaluate_actions_ddp(
                 norm_states,
                 actions,
                 average_entropy=True,

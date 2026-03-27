@@ -3,7 +3,7 @@
 set -euo pipefail
 
 DOWNLOAD_DIR=${DOWNLOAD_DIR:-$HOME}
-SUPPORT_LIST=("maniskill" "openpi")
+SUPPORT_LIST=("maniskill" "openpi" "smolvla")
 GITHUB_PREFIX=${GITHUB_PREFIX:-""}
 ASSETS=()
 
@@ -66,6 +66,23 @@ download_openpi_assets() {
 	fi
 }
 
+download_smolvla_assets() {
+	local root_dir=$1
+	local model_dir="${root_dir}/models/smolvla_libero"
+
+	if ! command -v hf &> /dev/null; then
+		echo "hf command not found. Please install huggingface_hub CLI first." >&2
+		exit 1
+	fi
+
+	if [ -f "$model_dir/config.json" ]; then
+		echo "[download_assets] SmolVLA checkpoint already exists at $model_dir, skipping download."
+	else
+		mkdir -p "$model_dir"
+		hf download HuggingFaceVLA/smolvla_libero --local-dir "$model_dir"
+	fi
+}
+
 parse_args() {
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
@@ -120,6 +137,9 @@ main() {
 				;;
 			openpi)
 				download_openpi_assets "$DOWNLOAD_DIR"
+				;;
+			smolvla)
+				download_smolvla_assets "$DOWNLOAD_DIR"
 				;;
 			*)
 				echo "Unknown asset group: $asset. Supported: ${SUPPORT_LIST[*]}" >&2

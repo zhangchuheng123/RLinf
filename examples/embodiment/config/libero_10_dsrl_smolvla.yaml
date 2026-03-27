@@ -63,13 +63,13 @@ env:
   train:
     env_type: libero # Environment type resolver key.
     task_suite_name: libero_10 # LIBERO task suite.
-    total_num_envs: 2 # Total train env instances across all ranks.
+    total_num_envs: 8 # Total train env instances across all ranks.
     auto_reset: False # Whether env auto-resets at termination.
     max_steps_per_rollout_epoch: 512 # Per-epoch env interaction budget (in steps).
     max_episode_steps: 512 # Episode horizon for truncation.
     use_fixed_reset_state_ids: True # Kept for compatibility; not consumed in no-ray DSRL runner.
     use_ordered_reset_state_ids: False # Kept for compatibility; not consumed in no-ray DSRL runner.
-    specific_task_id: null # Optional fixed LIBERO task id override.
+    specific_task_id: 0 # Fix training to task 0 in libero_10 across all ranks.
     use_rel_reward: True # Kept for compatibility; not consumed in no-ray DSRL runner.
     reward_coef: 5.0 # Kept for compatibility; not consumed in no-ray DSRL runner.
     reset_gripper_open: True # Kept for compatibility; not consumed in no-ray DSRL runner.
@@ -87,13 +87,13 @@ env:
   eval:
     env_type: libero # Environment type resolver key.
     task_suite_name: libero_10 # LIBERO task suite.
-    total_num_envs: 2 # Total eval env instances across all ranks.
+    total_num_envs: 8 # Total eval env instances across all ranks.
     auto_reset: True # Auto-reset completed eval episodes.
     max_steps_per_rollout_epoch: 512 # Eval interaction budget per eval run.
     max_episode_steps: 512 # Episode horizon for truncation.
     use_fixed_reset_state_ids: True # Keep eval starts deterministic when supported.
     use_ordered_reset_state_ids: False # Kept for compatibility; not consumed in no-ray DSRL runner.
-    specific_task_id: null # Optional fixed LIBERO task id override.
+    specific_task_id: 0 # Fix evaluation to task 0 in libero_10 across all ranks.
     use_rel_reward: True # Kept for compatibility; not consumed in no-ray DSRL runner.
     reward_coef: 5.0 # Kept for compatibility; not consumed in no-ray DSRL runner.
     reset_gripper_open: True # Kept for compatibility; not consumed in no-ray DSRL runner.

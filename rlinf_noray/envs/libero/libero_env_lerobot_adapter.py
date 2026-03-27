@@ -158,7 +158,20 @@ class LiberoEnv(gym.Env):
             The batched environment step results
         """
 
+        def _resolve_env_buffer(*names: str):
+            for name in names:
+                if hasattr(self.env, name):
+                    return name, getattr(self.env, name)
+            raise AttributeError(
+                f"SyncVectorEnv is missing expected buffers {names}; available attrs changed"
+            )
+
         actions = iterate(self.env.action_space, actions)
+
+        obs_attr, observations_buffer = _resolve_env_buffer("_observations", "observations")
+        reward_attr, rewards_buffer = _resolve_env_buffer("_rewards", "rewards")
+        term_attr, terminations_buffer = _resolve_env_buffer("_terminations", "_terminateds")
+        trunc_attr, truncations_buffer = _resolve_env_buffer("_truncations", "_truncateds")
 
         def _slice_obs(obs, env_idx):
             if isinstance(obs, dict):
@@ -170,17 +183,17 @@ class LiberoEnv(gym.Env):
         observations, infos = [], {}
         for i, action in enumerate(actions):
             if is_skip[i]:
-                env_obs = _slice_obs(self.env._observations, i)
-                self.env._rewards[i] = 0.0
-                self.env._terminations[i] = False
-                self.env._truncations[i] = False
+                env_obs = _slice_obs(observations_buffer, i)
+                rewards_buffer[i] = 0.0
+                terminations_buffer[i] = False
+                truncations_buffer[i] = False
                 env_info = {}
             else:
                 (
                     env_obs,
-                    self.env._rewards[i],
-                    self.env._terminations[i],
-                    self.env._truncations[i],
+                    rewards_buffer[i],
+                    terminations_buffer[i],
+                    truncations_buffer[i],
                     env_info,
                 ) = self.env.envs[i].step(action)
 
@@ -188,13 +201,21 @@ class LiberoEnv(gym.Env):
             infos = self.env._add_info(infos, env_info, i)
 
         # Concatenate the observations
-        self.env._observations = concatenate(self.env.single_observation_space, observations, self.env._observations)
+        observations_buffer = concatenate(
+            self.env.single_observation_space,
+            observations,
+            observations_buffer,
+        )
+        setattr(self.env, obs_attr, observations_buffer)
+        setattr(self.env, reward_attr, rewards_buffer)
+        setattr(self.env, term_attr, terminations_buffer)
+        setattr(self.env, trunc_attr, truncations_buffer)
 
         return (
-            deepcopy(self.env._observations),
-            np.copy(self.env._rewards),
-            np.copy(self.env._terminations),
-            np.copy(self.env._truncations),
+            deepcopy(observations_buffer),
+            np.copy(rewards_buffer),
+            np.copy(terminations_buffer),
+            np.copy(truncations_buffer),
             infos,
         )
     

@@ -8,6 +8,7 @@ MODEL=""
 ENV_NAME=""
 VENV_DIR=".venv"
 PYTHON_VERSION="3.11.14"
+TRANSFORMERS_VERSION="4.57.6"
 TEST_BUILD=${TEST_BUILD:-0}
 # Absolute path to this script (resolves symlinks)
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -203,6 +204,10 @@ EOF
     UV_TORCH_BACKEND=auto uv sync --active $NO_INSTALL_RLINF_CMD
 }
 
+ensure_transformers_version() {
+    uv pip install "transformers==${TRANSFORMERS_VERSION}"
+}
+
 install_flash_attn() {
     # Base release info – adjust when bumping flash-attn
     local flash_ver="2.7.4.post1"
@@ -368,6 +373,7 @@ install_openvla_model() {
             exit 1
             ;;
     esac
+    ensure_transformers_version
     uv pip install git+${GITHUB_PREFIX}https://github.com/openvla/openvla.git --no-build-isolation
     install_flash_attn
     uv pip uninstall pynvml || true
@@ -417,6 +423,7 @@ install_openvla_oft_model() {
             exit 1
             ;;
     esac
+    ensure_transformers_version
     uv pip uninstall pynvml || true
 }
 
@@ -471,6 +478,8 @@ install_openpi_model() {
             ;;
     esac
 
+            ensure_transformers_version
+
     # Replace transformers models with OpenPI's modified versions
     local py_major_minor
     py_major_minor=$(python - <<'EOF'
@@ -509,6 +518,7 @@ install_gr00t_model() {
             exit 1
             ;;
     esac
+    ensure_transformers_version
     uv pip uninstall pynvml || true
 }
 
@@ -523,7 +533,7 @@ install_dexbotic_model() {
             uv pip install -e "$dexbotic_path"
 
             install_maniskill_libero_env
-            uv pip install transformers==4.53.2
+            ensure_transformers_version
             ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for Dexbotic model." >&2
@@ -534,17 +544,22 @@ install_dexbotic_model() {
 }
 
 install_smolvla_model() {
+    local repo_root
+    repo_root="$(dirname "$SCRIPT_DIR")"
+
     case "$ENV_NAME" in
         maniskill_libero)
             create_and_sync_venv
             install_common_embodied_deps
             install_maniskill_libero_env
+            bash "$SCRIPT_DIR/embodied/download_assets.sh" --dir "$repo_root" --assets smolvla
             ;;
         *)
             echo "Environment '$ENV_NAME' is not supported for SmolVLA model." >&2
             exit 1
             ;;
     esac
+    ensure_transformers_version
     uv pip uninstall pynvml || true
 }
 

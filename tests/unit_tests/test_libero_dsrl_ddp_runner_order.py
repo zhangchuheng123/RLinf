@@ -7,6 +7,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from rlinf_noray.models.embodiment.modules.gaussian_policy import GaussianPolicy
 from rlinf_noray.runners.libero_dsrl_ddp_runner import LiberoDSRLDDPNoRayRunner
 
 
@@ -80,3 +81,43 @@ def test_gae_env_time_then_flat_aligns_with_flat_transition_order() -> None:
 
     assert torch.allclose(advantages_flat, expected_adv_flat, atol=1e-6)
     assert torch.allclose(returns_flat, expected_ret_flat, atol=1e-6)
+
+
+def test_evaluate_actions_ddp_matches_policy_evaluate_actions() -> None:
+    class _FakeDDP:
+        def __init__(self, module):
+            self.module = module
+
+        def __call__(self, *args, **kwargs):
+            return self.module(*args, **kwargs)
+
+    torch.manual_seed(0)
+
+    runner = LiberoDSRLDDPNoRayRunner.__new__(LiberoDSRLDDPNoRayRunner)
+    policy = GaussianPolicy(
+        input_dim=16,
+        output_dim=8,
+        hidden_dims=(32, 32),
+        action_horizon=1,
+    )
+    runner.actor = _FakeDDP(policy)
+
+    features = torch.randn(4, 16, dtype=torch.float32)
+    actions_2d = torch.tanh(torch.randn(4, 8, dtype=torch.float32))
+    actions_3d = actions_2d.unsqueeze(1)
+
+    for average_entropy in (False, True):
+        for actions in (actions_2d, actions_3d):
+            ddp_logprob, ddp_entropy = runner._evaluate_actions_ddp(
+                features,
+                actions,
+                average_entropy=average_entropy,
+            )
+            ref_logprob, ref_entropy = policy.evaluate_actions(
+                features,
+                actions,
+                average_entropy=average_entropy,
+            )
+
+            assert torch.allclose(ddp_logprob, ref_logprob, atol=1e-6)
+            assert torch.allclose(ddp_entropy, ref_entropy, atol=1e-6)
