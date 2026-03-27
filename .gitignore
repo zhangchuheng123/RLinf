@@ -20,3 +20,25 @@ uv.lock
 rlinf/envs/maniskill/assets
 PKG-INFO
 models/*
+
+# Media files
+*.[Mm][Pp]4
+*.[Mm][Oo][Vv]
+*.[Aa][Vv][Ii]
+*.[Mm][Kk][Vv]
+*.[Ww][Ee][Bb][Mm]
+*.[Mm]4[Vv]
+*.[Mm][Pp][Gg]
+*.[Mm][Pp][Ee][Gg]
+*.[Ww][Mm][Vv]
+*.[Ff][Ll][Vv]
+
+*.[Pp][Nn][Gg]
+*.[Jj][Pp][Gg]
+*.[Jj][Pp][Ee][Gg]
+*.[Ww][Ee][Bb][Pp]
+*.[Gg][Ii][Ff]
+*.[Bb][Mm][Pp]
+*.[Tt][Ii][Ff]
+*.[Tt][Ii][Ff][Ff]
+*.[Hh][Ee][Ii][Cc]
