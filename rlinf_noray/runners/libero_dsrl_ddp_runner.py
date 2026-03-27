@@ -501,6 +501,12 @@ class LiberoDSRLDDPNoRayRunner:
         self.max_epochs = int(cfg.runner.max_epochs)
         self.rollout_epoch = int(cfg.algorithm.rollout_epoch)
         self.update_epoch = int(cfg.algorithm.update_epoch)
+        self.pre_value_update_epoch = int(cfg.algorithm.get("pre_value_update_epoch", 20))
+        if self.pre_value_update_epoch < 0:
+            raise ValueError(
+                "algorithm.pre_value_update_epoch must be >= 0, "
+                f"got {self.pre_value_update_epoch}"
+            )
         self.num_execute_steps = int(cfg.runner.num_execute_steps)
         if self.num_execute_steps <= 0:
             raise ValueError(
@@ -629,6 +635,7 @@ class LiberoDSRLDDPNoRayRunner:
             init_summary = {
                 "rollout_epoch": self.rollout_epoch,
                 "update_epoch": self.update_epoch,
+                "pre_value_update_epoch": self.pre_value_update_epoch,
                 "num_execute_steps": self.num_execute_steps,
                 "chunk_steps": self.chunk_steps,
                 "state_dim": self.state_dim,
@@ -1052,14 +1059,40 @@ class LiberoDSRLDDPNoRayRunner:
         if effective_count == 0:
             return {}
 
+        # Optional value-only pre-updates before each standard PPO update block.
+        for _ in range(self.pre_value_update_epoch):
+            batch = self.replay_buffer.sample(self.minibatch_size)
+            states = torch.stack([transition.state for transition in batch], dim=0).to(self.device)
+            returns = torch.tensor(
+                [transition.value_target for transition in batch],
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            value_loss = _compute_value_loss(self.value_net, states, returns)
+            self.value_optimizer.zero_grad(set_to_none=True)
+            value_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.value_net.parameters(), self.grad_clip)
+            self.value_optimizer.step()
+
         metrics_acc = {
             "ppo_loss": 0.0,
             "value_loss": 0.0,
+            "value_mse": 0.0,
             "ref_value_loss": 0.0,
             "entropy": 0.0,
             "ratio": 0.0,
             "clip_fraction": 0.0,
+            "value_pred_mean": 0.0,
+            "value_pred_min": 0.0,
+            "value_pred_max": 0.0,
+            "value_target_mean": 0.0,
+            "value_target_min": 0.0,
+            "value_target_max": 0.0,
+            "value_target_oob_frac": 0.0,
         }
+        if self.dsrl_value_head_type == "distributional":
+            metrics_acc["value_ce_loss"] = 0.0
         updates = 0
 
         for _ in range(self.update_epoch):
@@ -1114,6 +1147,12 @@ class LiberoDSRLDDPNoRayRunner:
 
             value_pred = _predict_values(self.value_net, norm_states)
             value_loss = _compute_value_loss(self.value_net, norm_states, returns)
+            value_mse = torch.nn.functional.mse_loss(value_pred.float(), returns.float())
+            value_target_oob_frac = (
+                torch.logical_or(returns < self.dsrl_value_v_min, returns > self.dsrl_value_v_max)
+                .float()
+                .mean()
+            )
             ref_value_pred = torch.full_like(returns, fill_value=float(self._ref_value_running_mean))
             ref_value_loss = torch.nn.functional.mse_loss(ref_value_pred, returns)
 
@@ -1132,10 +1171,20 @@ class LiberoDSRLDDPNoRayRunner:
 
             metrics_acc["ppo_loss"] += float(policy_loss.detach().item())
             metrics_acc["value_loss"] += float(value_loss.detach().item())
+            metrics_acc["value_mse"] += float(value_mse.detach().item())
             metrics_acc["ref_value_loss"] += float(ref_value_loss.detach().item())
             metrics_acc["entropy"] += float(entropy.detach().mean().item())
             metrics_acc["ratio"] += float(ratio.detach().mean().item())
             metrics_acc["clip_fraction"] += float(clip_fraction.detach().item())
+            metrics_acc["value_pred_mean"] += float(value_pred.detach().mean().item())
+            metrics_acc["value_pred_min"] += float(value_pred.detach().min().item())
+            metrics_acc["value_pred_max"] += float(value_pred.detach().max().item())
+            metrics_acc["value_target_mean"] += float(returns.detach().mean().item())
+            metrics_acc["value_target_min"] += float(returns.detach().min().item())
+            metrics_acc["value_target_max"] += float(returns.detach().max().item())
+            metrics_acc["value_target_oob_frac"] += float(value_target_oob_frac.detach().item())
+            if self.dsrl_value_head_type == "distributional":
+                metrics_acc["value_ce_loss"] += float(value_loss.detach().item())
             updates += 1
 
         assert updates > 0, "PPO update produced zero optimization steps"
@@ -1220,11 +1269,19 @@ class LiberoDSRLDDPNoRayRunner:
                 metrics_to_log.update({f"train/{key}": value for key, value in ppo_metrics.items()})
                 metrics_to_log.update(eval_metrics)
                 self.metric_logger.log(metrics_to_log, step=epoch)
+                value_metric_label = (
+                    "value_ce" if self.dsrl_value_head_type == "distributional" else "value_mse"
+                )
+                value_metric_value = ppo_metrics.get("value_ce_loss", ppo_metrics["value_loss"])
                 print(
                     (
                         f"[noray][dsrl] epoch={epoch} trans={len(transitions)} "
                         f"ppo={ppo_metrics['ppo_loss']:.6f} "
-                        f"value={ppo_metrics['value_loss']:.6f} "
+                        f"{value_metric_label}={value_metric_value:.6f} "
+                        f"value_mse={ppo_metrics['value_mse']:.6f} "
+                        f"target=[{ppo_metrics['value_target_min']:.4f},{ppo_metrics['value_target_max']:.4f}] "
+                        f"pred=[{ppo_metrics['value_pred_min']:.4f},{ppo_metrics['value_pred_max']:.4f}] "
+                        f"target_oob={ppo_metrics['value_target_oob_frac']:.4f} "
                         f"clip_frac={ppo_metrics['clip_fraction']:.4f} "
                         f"noise_mean={rollout_metrics['noise_latent_mean']:.4f} "
                         f"noise_std={rollout_metrics['noise_latent_std']:.4f} "

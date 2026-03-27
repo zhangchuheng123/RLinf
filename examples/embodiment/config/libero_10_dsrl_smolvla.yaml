@@ -46,6 +46,7 @@ algorithm:
   rollout_epoch: 2 # Number of rollout loops per epoch.
   eval_rollout_epoch: 1 # Number of evaluation rollout loops.
   update_epoch: 10 # PPO optimization passes per epoch.
+  pre_value_update_epoch: 20 # One-time value-only warmup update passes before PPO training starts.
   dsrl_minibatch_size: 2048 # Mini-batch size for DSRL PPO updates.
   dsrl_replay_buffer_capacity_in_epoch: 1.2 # Replay capacity = transitions_per_epoch * this multiplier.
 
@@ -150,7 +151,7 @@ actor:
   optim:
     lr: 5.0e-6 # Generic learning rate (kept for compatibility).
     dsrl_actor_lr: 1.0e-5 # DSRL actor optimizer learning rate.
-    dsrl_value_lr: 2.0e-5 # DSRL value optimizer learning rate.
+    dsrl_value_lr: 1.0e-4 # DSRL value optimizer learning rate.
     adam_beta1: 0.9 # Adam beta1.
     adam_beta2: 0.95 # Adam beta2.
     adam_eps: 1.0e-08 # Adam epsilon.
