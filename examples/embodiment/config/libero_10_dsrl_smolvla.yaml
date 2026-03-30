@@ -55,7 +55,7 @@ algorithm:
 
   dsrl_ppo_clip: 0.2 # PPO clipping range.
   dsrl_max_log_ratio: 20.0 # Clamp range for log ratio before exp.
-  dsrl_entropy_coef: 0.01 # Entropy regularization coefficient.
+  dsrl_entropy_coef: 0.0 # Entropy regularization coefficient (disabled for debugging).
 
 env:
   group_name: "EnvGroup" # Logical env component group name.

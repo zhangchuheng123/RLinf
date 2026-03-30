@@ -1121,6 +1121,11 @@ class LiberoDSRLDDPNoRayRunner:
             "value_target_max": 0.0,
             "value_target_oob_frac": 0.0,
         }
+        first_update_metrics = {
+            "ratio_update0": 0.0,
+            "ratio_update0_abs_delta_from_1": 0.0,
+            "clip_fraction_update0": 0.0,
+        }
         if self.dsrl_value_head_type == "distributional":
             metrics_acc["value_ce_loss"] = 0.0
         updates = 0
@@ -1130,7 +1135,7 @@ class LiberoDSRLDDPNoRayRunner:
             batch = self.replay_buffer.sample(self.minibatch_size)
             states = torch.stack([transition.state for transition in batch], dim=0).to(self.device)
             returns = torch.tensor(
-                [transition.value_target for transition in batch],
+                [transition.returns for transition in batch],
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -1141,7 +1146,7 @@ class LiberoDSRLDDPNoRayRunner:
             torch.nn.utils.clip_grad_norm_(self.value_net.parameters(), self.grad_clip)
             self.value_optimizer.step()
 
-        for _ in range(self.update_epoch):
+        for update_idx in range(self.update_epoch):
             batch = self.replay_buffer.sample(self.minibatch_size)
 
             states = torch.stack([transition.state for transition in batch], dim=0).to(self.device)
@@ -1157,7 +1162,7 @@ class LiberoDSRLDDPNoRayRunner:
                 device=self.device,
             )
             returns = torch.tensor(
-                [transition.value_target for transition in batch],
+                [transition.returns for transition in batch],
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -1188,6 +1193,11 @@ class LiberoDSRLDDPNoRayRunner:
                 .float()
                 .mean()
             )
+            if update_idx == 0:
+                ratio_update0 = float(ratio.detach().mean().item())
+                first_update_metrics["ratio_update0"] = ratio_update0
+                first_update_metrics["ratio_update0_abs_delta_from_1"] = abs(ratio_update0 - 1.0)
+                first_update_metrics["clip_fraction_update0"] = float(clip_fraction.detach().item())
             policy_loss = - torch.min(ratio * advantages, clipped_ratio * advantages).mean()
             entropy_loss = - self.entropy_coef * entropy.mean()
 
@@ -1236,6 +1246,7 @@ class LiberoDSRLDDPNoRayRunner:
         assert updates > 0, "PPO update produced zero optimization steps"
         for key in metrics_acc:
             metrics_acc[key] /= float(updates)
+        metrics_acc.update(first_update_metrics)
         return _reduce_mean_dict(metrics_acc, self.device)
 
     def _evaluate(self) -> dict[str, float]:
