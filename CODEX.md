@@ -306,3 +306,7 @@ for i in reversed(range(batch_size)):
     prev_return = returns[i]
     prev_value = values[i]
     prev_advantage = advantages[i]
+
+# Q19
+
+1）修复使用 MC returns 做训练，保留 value_target 的计算，但是最后学习的时候使用 returns；2）监测 update_epoch 第一轮时的 ratio，该 ratio 应该接近 1（当 replay buffer 不复用上一轮样本的时候应该为 1）；3）在配置中先关闭 entropy loss。列出更为详细一点的改动计划，然后进行改动。
