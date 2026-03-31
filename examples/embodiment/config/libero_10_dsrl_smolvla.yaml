@@ -47,7 +47,7 @@ algorithm:
   eval_rollout_epoch: 1 # Number of evaluation rollout loops.
   update_epoch: 10 # PPO optimization passes per epoch.
   pre_value_update_epoch: 20 # One-time value-only warmup update passes before PPO training starts.
-  dsrl_minibatch_size: 2048 # Mini-batch size for DSRL PPO updates.
+  dsrl_minibatch_size: 2048 # Global mini-batch size for each DSRL PPO update across all DDP ranks.
   dsrl_replay_buffer_capacity_in_epoch: 1.2 # Replay capacity = transitions_per_epoch * this multiplier.
 
   gamma: 0.99 # Discount factor.

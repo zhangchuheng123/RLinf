@@ -1,140 +1,247 @@
 # AGENTS.md
 
-Brief for AI coding agents working on RLinf. For full contribution flow, code style, and PR process see [CONTRIBUTING.md](CONTRIBUTING.md).
+## Read This First
 
-**Quick orientation:** RLinf is a distributed RL stack (embodied + reasoning + agent). It uses **Ray** for process management and **Hydra** for config. Single-machine runs use `cluster.num_nodes: 1`; multi-node needs Ray started on every node with `RLINF_NODE_RANK` set *before* `ray start`. Pre-commit runs Ruff (lint + format) and commit-check; use Google-style docstrings and type hints. All user-facing changes need tests and docs. If something is unclear, add a `TODO(agent)` and note the limitation.
+This repository is currently being used to debug and improve embodied reinforcement learning on LIBERO. Before making changes, read `CODEX.md` for the latest task history, debugging constraints, and temporary workflows that are still in active use.
 
----
+## Project Goal
 
-## Code structure
+The main goal of this workspace is to make reinforcement learning run reliably on the LIBERO environment and to reach both good sample efficiency and good compute efficiency.
 
-- **`.cursor/`** – Rules and skills: `rules/agents-md.mdc`, `skills/add-install-docker-ci-e2e`, `skills/add-example-doc-model-env`, `skills/review-pr`.
-- **`rlinf/`** – Main package:
-  - `agents/` – Agent logic (reasoning, tools).
-  - `algorithms/` – Advantages, losses, registry, rewards (math, code, searchr1, vqa).
-  - `config.py` – Hydra config, `SupportedModel`, `SupportedEnvType`, validation.
-  - `data/` – Datasets for embodied, reasoning, agent.
-  - `envs/` – ManiSkill, LIBERO, IsaacLab, CALVIN, MetaWorld, Behavior, RoboCasa, FrankaSim, RealWorld, RoboTwin, Habitat, OpenSora world model; `get_env_cls()` in `envs/__init__.py`.
-  - `hybrid_engines/` – SGLang/vLLM rollout integration.
-  - `models/` – Embodiment (OpenVLA, OpenVLA-OFT, OpenPI, GR00T, MLP/CNN/Flow/CMA) and reasoning wiring.
-  - `runners/` – Embodied (sync/async), reasoning, coding_online_rl, agent, SFT, eval.
-  - `scheduler/` – Cluster, Worker, WorkerGroup, channel, manager, placement, dynamic_scheduler.
-  - `utils/` – Logging, placement, data iter, distributed, checkpoint, resharding.
-  - `workers/` – Actor (FSDP/Megatron), rollout (HF/server), env (sync/async), reward, replay buffer.
-- **`examples/`** – Entrypoints and YAML: embodiment, reasoning, coding_online_rl, searchr1, sft, multiturn_demo, wideseek_r1.
-- **`tests/`** – `unit_tests/`, `e2e_tests/` (embodied, agent, reasoning), scheduler tests; e2e configs under `e2e_tests/embodied/*.yaml`.
-- **`requirements/`** – `install.sh` (targets: embodied, reason, docs; `--model`, `--env`), optional deps in subdirs.
-- **`docker/`** – Dockerfile and build targets per model/env.
-- **`ray_utils/`** – `start_ray.sh` (multi-node head/worker), `check_ray.sh`, `realworld/setup_before_ray.sh`.
-- **`toolkits/`** – Checkpoint convertors, verifiers, eval scripts, replay buffer, auto-placement.
-- **`docs/`** – Sphinx RST (EN/ZH): start, tutorials, examples, APIs, FAQ.
+The current milestone is narrower and should drive most near-term work:
 
----
+- Get DSRL working end to end on LIBERO with SmolVLA.
+- Focus on a single LIBERO task first.
+- Reach 100% success rate on that single task before expanding scope.
 
-## How RLinf runs
+## Directory Ownership
 
-You launch one entry script (e.g. `train_embodied_agent.py`, `train_async.py`). It builds a **Cluster** (Ray must already be up), figures **component placement** (actor, rollout, env, reward, agent), and starts **Worker** groups. A **Runner** drives the loop: rollout → reward → advantage → actor update (and any inference/engine lifecycle). Cluster config lives in YAML under `cluster:`: `num_nodes`, `component_placement`, `node_groups` (labels, node_ranks, env_configs, optional hardware e.g. Franka). Placement (e.g. `HybridComponentPlacement`, `ModelParallelComponentPlacement`) maps components to node groups and hardware ranks. Workers are Ray remote actors with `MASTER_*`, `RANK`, etc.; they can `send`/`recv` across groups. Training backends: FSDP or Megatron. Rollout: SGLang or vLLM. Runners pick loss/advantage from config (PPO, GRPO, SAC, etc.).
+Use the repository with these boundaries in mind:
 
----
+- `rlinf_noray/` is the primary implementation directory. New logic and bug fixes should go here unless there is a strong reason otherwise.
+- `lerobot/` is a reference and alignment directory. It is useful for comparing preprocessing, postprocessing, rollout, and normalization behavior. Keep edits minimal.
+- `rlinf/` is the original reference directory. Do not use it as the primary place for new work.
+- `examples/embodiment/` contains the main runnable shell entrypoints and Hydra configs for this embodied workflow.
+- `exp_bash/` stores managed experiment launch scripts, copied configs, lightweight launch entrypoints, and experiment-specific analysis tools such as WandB fetch scripts. Keep experiment workflows as self-contained as practical because `examples/` is expected to be removed later.
+- `models/` stores downloaded model checkpoints, including the local SmolVLA LIBERO model used by the current scripts.
+- `requirements/` contains environment setup scripts.
 
-## Single-node and multi-node
+For this project, assume that future work should converge into `rlinf_noray/`, not into `lerobot/` or `rlinf/`.
 
-**Single machine:** Install via Docker or `bash requirements/install.sh embodied --model <model> --env <env>` (set `REPO_PATH` and any asset paths). Ray may auto-start; or run `ray start --head`. Use a config with `cluster.num_nodes: 1` (e.g. from `examples/embodiment/config/`). Launch with `bash examples/embodiment/run_embodiment.sh <config_name>` or `python examples/embodiment/train_embodied_agent.py --config-name <config_name>`, and set env vars the example needs (e.g. `MUJOCO_GL=egl`, `ROBOT_PLATFORM`).
+## Canonical Setup
 
-**Multiple machines:** On each node, *before* `ray start`: set `export RLINF_NODE_RANK=<0..N-1>` (unique) and optionally `RLINF_COMM_NET_DEVICES`. Head: `ray start --head --port=6379 --node-ip-address=<head_ip>`. Workers: `ray start --address=<head_ip>:6379`. You can use `ray_utils/start_ray.sh`. Set `cluster.num_nodes` to the total; optionally use `node_groups` and `component_placement` (see `rlinf/scheduler/cluster/config.py` and the [heterogeneous cluster tutorial](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/hetero.html)). Run the entry script *only on the head*; it attaches to the existing Ray cluster and schedules workers by placement.
+The actual environment setup path in this repository is:
 
----
+```bash
+bash requirements/install.sh embodied --model smolvla --env maniskill_libero
+```
 
-## Configuration guides
+## Canonical Run Entry
 
-- **Placement and throughput:** Configure `cluster.component_placement` (collocated vs disaggregated vs hybrid, node groups, hardware ranks). See [placement tutorial](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/user/placement.html) and [execution modes](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/mode/index.html).
-- **OOM:** Tune env (`total_num_envs`, `group_size`), rollout (batch/seq, `gpu_memory_utilization`, `enable_offload`), actor (`micro_batch_size`, `global_batch_size`, `gradient_checkpointing`, `enable_offload`). Example configs in `examples/embodiment/config/`. See [FAQ](https://rlinf.readthedocs.io/en/latest/rst_source/faq.html) for SGLang/memory issues.
-- **Multi-node and hetero:** Set `cluster.num_nodes`; set `RLINF_NODE_RANK` (and optionally `RLINF_COMM_NET_DEVICES`) **before** `ray start` on each node—Ray captures env at start time. Optional `node_groups` and `component_placement` in YAML; `env_configs` (e.g. `env_vars`, `python_interpreter_path`) are applied at worker allocation. See [heterogeneous cluster](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/hetero.html) and `rlinf/scheduler/cluster/config.py`.
+The main DSRL entrypoint for this workspace is:
 
----
+```bash
+bash examples/embodiment/run_libero_dsrl_smolvla_noray.sh
+```
 
-## Metrics, checkpoints, and evaluation
+Useful debugging variants:
 
-- **Metrics:** Runners use `MetricLogger`; set `runner.logger.logger_backends` (e.g. tensorboard, wandb, swanlab). Namespaces include `train/`, `eval/`, `env/`, `rollout/`, `time/`. See [logger tutorial](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/logger.html).
-- **Checkpoints:** Saved every `runner.save_interval` under `.../checkpoints/global_step_<N>/`. To resume, set `runner.resume_dir` to that path and relaunch; some runners support `resume_dir: auto`. See [checkpoint resume tutorial](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/resume.html).
-- **Evaluation:** During training, `runner.val_check_interval` triggers validation. Standalone embodied: `bash examples/embodiment/eval_embodiment.sh <config_name>` with an eval config; see [VLA evaluation](https://rlinf.readthedocs.io/en/latest/rst_source/start/vla-eval.html). Reasoning/LLM: see [LLM evaluation](https://rlinf.readthedocs.io/en/latest/rst_source/start/llm-eval.html).
+```bash
+DISABLE_WANDB=1 bash examples/embodiment/run_libero_dsrl_smolvla_noray.sh
+DISABLE_WANDB=1 SAVE_ROLLOUT_VIDEO=1 bash examples/embodiment/run_libero_dsrl_smolvla_noray.sh
+```
 
----
+The shell script already configures the common runtime environment, including `MUJOCO_GL=egl`, `PYOPENGL_PLATFORM=egl`, `PYTHONPATH`, the local `.venv`, and Hydra overrides.
 
-## When things go wrong
+## Main Code Paths
 
-For debugging (breakpoints, rendering/EGL, network, NCCL/CUDA, timeouts), see the [FAQ](https://rlinf.readthedocs.io/en/latest/rst_source/faq.html) in Further reading.
+These files define the current DSRL workflow and should be the first places to inspect when debugging or changing behavior:
 
----
+- `examples/embodiment/run_libero_dsrl_smolvla_noray.sh`
+  - Main shell entrypoint.
+  - Sets the model path to `models/smolvla_libero`.
+  - Launches distributed training with `torchrun`.
+  - Applies runtime overrides such as train env count, eval env count, rollout video settings, and logger backend selection.
 
-## Key ideas and plugging in
+- `examples/embodiment/train_embodied_agent_noray.py`
+  - Dispatches to the no-ray runners.
+  - The DSRL path is selected through the `libero_10_dsrl_smolvla` config.
 
-**Config** (`rlinf/config.py`): `build_config` / `validate_cfg` produce the full DictConfig. New model or env types go into `SupportedModel` / `SupportedEnvType` and validation.
+- `examples/embodiment/config/libero_10_dsrl_smolvla.yaml`
+  - Canonical Hydra config for the current DSRL workflow.
+  - Default precision is `bf16`.
+  - Both train and eval are currently pinned to `specific_task_id: 0`.
+  - Contains DSRL hyperparameters, replay settings, rollout settings, and logger configuration.
 
-**Cluster and placement:** `ClusterConfig` and strategies in `rlinf/scheduler/placement/`, `rlinf/utils/placement.py`. Placement controls where actor/rollout/env run (one node vs many, GPU vs CPU, heterogeneous).
+- `rlinf_noray/runners/libero_dsrl_ddp_runner.py`
+  - Main DSRL training loop.
+  - Contains replay buffer logic, rollout collection, PPO/value updates, and evaluation.
+  - This is the primary file for debugging training behavior.
 
-**Algorithms:** Advantage and loss functions are registered in `rlinf/algorithms/` (registry + decorators); rewards are registered in `rlinf/algorithms/rewards/`. Config keys `algorithm.adv_type` and `algorithm.loss_type` select them. See [Extending RLinf: algorithms, models, envs](#extending-rlinf-algorithms-models-envs) for step-by-step instructions.
+- `rlinf_noray/envs/libero/libero_env_lerobot_adapter.py`
+  - LIBERO environment adapter used by the no-ray runner.
+  - Handles observation conversion, task descriptions, chunk stepping, and alignment hooks.
 
-**Models (embodied):** Register in `SupportedModel` in `config.py`, implement under `rlinf/models/embodiment/<name>/` (e.g. `BasePolicy`), wire in config and workers. Use add-install-docker-ci-e2e for install/Docker/CI. Details in the extension section below.
+## Current Status
 
-**Environments:** Register in `SupportedEnvType` and `get_env_cls()` in `rlinf/envs/__init__.py`, implement under `rlinf/envs/<name>/`. Use add-install-docker-ci-e2e and add-example-doc-model-env for install and docs. Details below.
+The current project status is:
 
-**Workers:** Subclass `Worker`, implement `initialize` and your API, launch with `create_group(...).launch(...)`. Use `self.log_info` / `log_warning` / `log_error`; no print.
+- DSRL is the main line of work.
+- The current target is single-task success, not broad multi-task coverage.
+- The current runner is the no-ray path.
+- The current best run to focus on is `libero_10_dsrl_smolvla_scalar_ddp16x4_mc`.
+- The real target is not a single evaluation spike to `100%`. Evaluation volume is small, so the goal is to reach `100%` repeatedly and stably across many evaluations.
+- The practical acceptance target is that the most recent 20 evaluation rounds should have mean `eval/success_rate >= 0.98`.
+- The current problem is that the run can reach high single-eval success occasionally, but it still does not stay at stable `100%` success over repeated evaluations.
 
-**Runners:** They own the training loop. New task type = new runner + entry script that builds Cluster, placement, worker groups, and calls the runner.
+When choosing what to work on next, prioritize DSRL training dynamics, rollout correctness, model inference alignment, and reward/value learning behavior over unrelated cleanup.
 
----
+## Metric Guide
 
-## Extending RLinf: algorithms, models, envs
+Use the currently best run `libero_10_dsrl_smolvla_scalar_ddp16x4_mc` as the main reference when interpreting metrics.
 
-### New algorithms (advantage, loss, reward)
+### Core Metrics
 
-**Advantage function**
+- `eval/success_rate`
+  - The most important outcome metric.
+  - Because evaluation volume is small, do not treat a single `1.0` point as success.
+  - The real target is repeated and stable `1.0` across many evaluation rounds.
+  - The practical acceptance rule is that the most recent 20 evaluations should average at least `0.98`.
 
-- Implement a function that takes the same keyword args as existing ones (e.g. `rewards`, `values`, `dones`, `gamma`, `loss_mask`, …) and returns `(advantages, returns)`. See `rlinf/algorithms/advantages.py` (e.g. `compute_gae_advantages_and_returns`) for signatures.
-- Register it: `from rlinf.algorithms.registry import register_advantage` then `@register_advantage("my_adv")` on your function. The name is case-normalized to lowercase.
-- In config YAML set `algorithm.adv_type: my_adv`. Actor workers call `calculate_adv_and_returns(adv_type=...)` which dispatches via `get_adv_and_returns(name)`.
-- For non-GAE styles (e.g. GRPO, Reinforce++), `rlinf/algorithms/utils.py` may need to compute scores first; check how `adv_type` is used in `calculate_adv_and_returns` and in the actor worker.
+- `rollout/success_rate`
+  - Success rate measured on the trajectories collected during training rollout for the current epoch.
+  - Useful for judging whether online data collection is improving, but it is not the final acceptance metric.
 
-**Policy loss**
+- `rollout/recent_success`
+  - Smoothed recent trajectory success statistic from the replay-buffer-side success tracking.
+  - Useful for judging whether improvement is sustained rather than coming from one noisy epoch.
 
-- Implement a function that accepts the kwargs passed by the actor (e.g. `logprobs`, `old_logprobs`, `advantages`, `clip_ratio_low`, `clip_ratio_high`, `loss_mask`, …) and returns `(loss_tensor, metrics_dict)`. See `rlinf/algorithms/losses.py` (e.g. `compute_ppo_actor_loss`, `compute_ppo_actor_critic_loss`, `compute_grpo_actor_loss_fn`).
-- Register: `from rlinf.algorithms.registry import register_policy_loss` then `@register_policy_loss("my_loss")`.
-- In config set `algorithm.loss_type: my_loss`. For PPO-style actor+critic you need a critic and value loss; the unified entry is `policy_loss(loss_type=..., **kwargs)` in `registry.py`. Add validation in `rlinf/config.py` if your loss has special requirements (e.g. `validate_cfg` already checks `loss_type == "actor_critic"` for value head).
+- `train/value_loss`
+  - Main value learning objective.
+  - For `scalar` value head, this is the same as value regression loss.
+  - For `distributional` value head, this is the distributional classification loss and should not be compared numerically to scalar MSE.
 
-**Reward**
+- `train/value_mse`
+  - Scalar regression error between predicted value and target return.
+  - For scalar head, this is effectively the same quantity as `train/value_loss`.
+  - For distributional head, this is an auxiliary interpretation metric and is easier to compare across runs than cross-entropy.
 
-- Add a reward class (e.g. under `rlinf/algorithms/rewards/<domain>/`) that matches the interface expected by the reward worker (e.g. callable or class with a clear contract for prompt/completions/ids).
-- In `rlinf/algorithms/rewards/__init__.py`: import the class, then `register_reward("my_reward", MyRewardClass)`. The registry is `reward_registry`; lookup via `get_reward_class(name)`.
-- Wire the reward name in config and in the runner/reward worker so the correct class is instantiated and used. For reasoning/agent tasks the config path may be under `reward.path` or similar.
+- `train/ref_value_loss`
+  - Reference baseline loss from a simple running-mean value predictor.
+  - If the learned value model is not clearly better than this reference, the critic is probably not learning useful signal.
 
-### New embodied model
+### Debug-Oriented Metrics
 
-- **Registration:** In `rlinf/config.py`, add a new value to the `SupportedModel` enum: `MY_MODEL = ("my_model", "embodied")`. Use `get_supported_model(model_type)` in validation so `model.model_type: my_model` is accepted.
-- **Implementation:** Create a package under `rlinf/models/embodiment/my_model/`. For policies that fit the embodied actor interface, inherit from `rlinf.models.embodiment.base_policy.BasePolicy` and implement `default_forward` and `predict_action_batch`; add other forward types (e.g. `sac_forward`, `crossq_forward`) if the algorithm needs them. For HuggingFace-based VLAs, follow the pattern in the docs: register config and processor in `rlinf/models/__init__.py` (`get_model_config_and_processor`), then implement an action model that wraps generation and optional value head.
-- **Config and workers:** Ensure `build_config` / default configs provide the right `model.model_type`, checkpoint paths, and any model-specific options. Actor and rollout workers already branch on `cfg.actor.model.model_type` / `cfg.rollout.model.model_type`; add branches or a factory so your model is instantiated and used. For FSDP+HuggingFace, see the [new model (FSDP) tutorial](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/extend/new_model_fsdp.html); for Megatron there is a separate [new model (Megatron) tutorial](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/extend/new_model_megatron.html).
-- **Install and CI:** If the model needs extra deps or a dedicated venv, add it to `requirements/install.sh` (e.g. `SUPPORTED_MODELS`, and an `install_my_model()` or branch in the model switch). For Docker and e2e: use the skill `.cursor/skills/add-install-docker-ci-e2e` (install script, Dockerfile stage, CI job, e2e config under `tests/e2e_tests/embodied/`).
+- `train/ratio_update0` and `train/ratio_update0_abs_delta_from_1`
+  - Debug-only freshness checks for the first PPO update.
+  - They should stay extremely close to `1` and `0` respectively when the sampled transitions are being updated for the first time.
+  - Small deviations can appear when replay buffer reuse mixes in samples that were already updated in the previous round.
+  - Do not use these as the main measure of policy improvement.
 
-### New environment
+- `train/ratio`
+  - Mean PPO importance ratio over sampled minibatches.
+  - Useful when debugging whether policy updates are moving too much or too little, but it is not a direct task-performance metric.
 
-- **Registration:** In `rlinf/envs/__init__.py`, add a member to `SupportedEnvType`: e.g. `MY_ENV = "my_env"`. In `get_env_cls(env_type, env_cfg=None, ...)` add an `elif env_type == SupportedEnvType.MY_ENV:` branch that imports your env class and returns it (lazy import to avoid loading heavy deps at import time). If the env needs a task id (like IsaacLab), use `env_cfg` and document the expected shape.
-- **Implementation:** Create `rlinf/envs/my_env/` with at least one module defining a gym-style env (e.g. `gymnasium.Env`): `reset`, `step`, and the usual attributes (`observation_space`, `action_space`). Follow the [new environment tutorial](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/extend/new_env.html) for the expected structure (e.g. vectorized `num_envs`, `group_size`, `ret_device`). If your env uses custom action formatting, add a branch in `rlinf/envs/action_utils.py` in `prepare_actions(env_type, ...)` so rollout/workers pass correctly shaped actions.
-- **Config:** Set `env.train.env_type` and `env.eval.env_type` to the string value of your enum (e.g. `my_env`). Add any env-specific defaults or validation in `rlinf/config.py` (e.g. `validate_cfg` already has env-specific checks for ManiSkill, Behavior, etc.; add similar ones if needed).
-- **Install and docs:** For install/Docker/CI, use `.cursor/skills/add-install-docker-ci-e2e` (add env to `SUPPORTED_ENVS`, install logic, e2e config). For example docs and RST, use `.cursor/skills/add-example-doc-model-env`.
+- `train/ratio_std`
+  - Standard deviation of PPO importance ratios inside the sampled minibatch.
+  - Useful for checking whether the update is globally tiny or whether only a small subset of samples is moving.
 
----
+- `train/clip_fraction` and `train/clip_fraction_update0`
+  - Fraction of samples whose PPO ratio is outside the clipping range.
+  - These help diagnose whether PPO updates are too aggressive or too weak.
+  - Interpret them together with success metrics and optimization settings rather than in isolation.
 
-## Style and contributing
+- `train/approx_kl`
+  - Approximate KL-style distance between old and new policy log-probabilities.
+  - Useful for tracking actual policy movement during PPO updates.
 
-Google Python style; Ruff for lint/format; docstrings and type hints on public APIs. Logging: `rlinf.utils.logging.get_logger()` or Workers’ `self.log_*`. Config YAML: static values only; no computed fields; don’t overwrite user-facing fields in code. Commits: [Conventional Commits](https://www.conventionalcommits.org/), ~72-char subject, imperative; every commit `Signed-off-by:` (e.g. `git commit -s`). PRs: same title format, fill template, link issues; for perf-sensitive changes include test results. New behavior needs tests (unit or e2e); if e2e needs GPUs/hardware, document and skip appropriately in CI. Full details: [CONTRIBUTING.md](CONTRIBUTING.md).
+- `train/old_logprob_mean`, `train/new_logprob_mean`, `train/log_ratio_mean`
+  - Describe the old/new action log-probability scale and the average PPO log-ratio.
+  - These are debugging signals for policy update magnitude, not outcome metrics.
 
----
+- `train/advantage_raw_mean`, `train/advantage_raw_std`, `train/advantage_raw_abs_mean`, `train/advantage_raw_min`, `train/advantage_raw_max`, `train/advantage_pos_frac`
+  - Describe the raw, pre-normalization advantage signal currently used to train the actor.
+  - These are the main diagnostics for checking whether actor-side learning signal is strong, sparse, saturated, or sign-imbalanced.
 
-## Further reading
+- `train/actor_grad_norm` and `train/value_grad_norm`
+  - Gradient norm diagnostics measured before clipping.
+  - Useful for checking whether actor/value updates are imbalanced or near-zero.
 
-- [Docs (EN)](https://rlinf.readthedocs.io/en/latest/) · [中文](https://rlinf.readthedocs.io/zh-cn/latest/)
-- [Installation](https://rlinf.readthedocs.io/en/latest/rst_source/start/installation.html) · [VLA quickstart](https://rlinf.readthedocs.io/en/latest/rst_source/start/vla.html)
-- [Example gallery](https://rlinf.readthedocs.io/en/latest/rst_source/examples/index.html) · configs in `examples/embodiment/config/`, `examples/reasoning/`, etc.
-- Tutorials: [placement / cluster / YAML](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/user/index.html), [hybrid / disaggregated](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/mode/index.html), [heterogeneous cluster](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/hetero.html), [extend (new env/model)](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/extend/index.html), [RL algorithms](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/rlalg/index.html), [logger (metrics)](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/logger.html), [checkpoint resume](https://rlinf.readthedocs.io/en/latest/rst_source/tutorials/advance/resume.html)
-- Evaluation: [VLA evaluation](https://rlinf.readthedocs.io/en/latest/rst_source/start/vla-eval.html) · [LLM evaluation](https://rlinf.readthedocs.io/en/latest/rst_source/start/llm-eval.html)
-- [APIs](https://rlinf.readthedocs.io/en/latest/rst_source/apis/index.html) (actor, channel, cluster, placement, worker, env, data, …) · [FAQ](https://rlinf.readthedocs.io/en/latest/rst_source/faq.html)
+- `train/value_target_mean`, `train/value_target_min`, `train/value_target_max`
+  - Describe the value-learning target distribution currently being fed into the critic.
+  - Useful for checking whether targets are collapsed, sparse, or drifting unexpectedly.
+
+- `train/value_pred_mean`, `train/value_pred_min`, `train/value_pred_max`
+  - Describe the current critic prediction range.
+  - Compare them with the target statistics to judge calibration and saturation.
+
+- `train/value_target_oob_frac`
+  - Fraction of value targets falling outside the expected support range.
+  - Mainly useful for debugging target/support mismatch, especially with distributional value heads.
+
+- `train/entropy`
+  - Policy entropy statistic.
+  - Useful for debugging exploration collapse or overly diffuse policies, but not a final success indicator by itself.
+
+- `rollout/noise_latent_mean` and `rollout/noise_latent_std`
+  - Describe the sampled latent noise fed into SmolVLA.
+  - Useful for checking whether the actor distribution is collapsing or drifting unexpectedly.
+
+- `rollout/actor_mean_mean`, `rollout/actor_mean_std`, `rollout/actor_logstd_mean`, `rollout/actor_logstd_std`
+  - Describe the Gaussian actor output statistics in latent-noise space.
+  - These are debugging signals for policy distribution drift, scale, and exploration behavior.
+  - Do not treat them as direct evidence that task performance improved.
+
+- `train/ppo_loss`
+  - PPO objective value.
+  - Useful for optimization debugging, but its absolute magnitude is usually not a reliable task-level success metric.
+
+## Working Rules For Agents
+
+Follow these rules when making changes in this workspace:
+
+- Prefer minimal, targeted edits.
+- Fail fast. Do not add default fallbacks or silent recovery logic that hides unexpected errors.
+- Keep primary implementation work inside `rlinf_noray/`.
+- Only modify `lerobot/` when it is necessary for alignment or reference-based comparison.
+- Do not move new logic into `rlinf/`.
+- Preserve ongoing debugging workflows unless explicitly asked to remove them.
+- Temporary alignment or dump code may still be in active use. Do not delete it casually.
+- If you add temporary debugging code, make it easy to identify and remove later.
+
+## Experiment Management
+
+When adding new experiment launchers or experiment-specific code, follow these rules:
+
+- Put reusable experiment bash launchers under `exp_bash/`.
+- Do not make `exp_bash/` launchers call bash scripts under `examples/`.
+- Do not make `exp_bash/` experiment configs depend on Hydra config files under `examples/`.
+- Prefer self-contained experiment bundles in `exp_bash/`: bash launcher, copied config, and any tiny experiment-specific entrypoint needed for launching.
+- If a WandB or result-analysis tool is tightly coupled to active experiment scripts, put it under `exp_bash/` rather than general tooling directories.
+- Keep experiment launchers flat and traceable. Favor local copies over indirect references when that reduces cross-directory coupling.
+- Name experiment bash files with `YYYYMMDD` plus concise keywords and important parameter hints.
+- In each experiment bash file, record at least: background, goal, and what changed relative to the previous baseline.
+- Keep experiment-management notes up to date so future agents can see why each run exists.
+- When comparing experiments across different machines, keep algorithm-level settings fixed as global quantities whenever possible.
+- In particular, keep `env.train.total_num_envs`, `env.eval.total_num_envs`, rollout horizon settings, PPO update counts, and DSRL PPO minibatch size aligned across machines.
+- Treat `algorithm.dsrl_minibatch_size` as a global PPO minibatch size across all DDP ranks, not a per-rank batch size.
+- Different machines may run at different speeds, but experiment scripts should avoid changing algorithm-level sample counts just because GPU count changes.
+- If DDP world size changes across machines, derive per-rank quantities from the same global experiment settings instead of retuning the algorithm implicitly.
+- The long-term direction is to reduce dependence on `examples/` for active DSRL experimentation. New experiment assets should be added under `exp_bash/` unless there is a strong reason not to.
+
+## Practical Guidance
+
+For this repository, a useful default workflow is:
+
+1. Read `CODEX.md` to understand the active debugging context.
+2. Reproduce behavior with `examples/embodiment/run_libero_dsrl_smolvla_noray.sh`.
+3. Inspect or modify `rlinf_noray/runners/libero_dsrl_ddp_runner.py` first for DSRL logic changes.
+4. Inspect or modify `rlinf_noray/envs/libero/libero_env_lerobot_adapter.py` for rollout or environment-interface issues.
+5. Compare against `lerobot/` only when alignment with the reference pipeline is required.
+
+Keep the work focused on getting the DSRL path stable and successful on a single LIBERO task.
+
+## Additional Requirement For Agents
+
+- Compress key information/findings and interaction history, and add them to AGENT_HIST.md. 
+- In AGENT_HIST.md, you can modify the content within the same day. If it is another day, please append.

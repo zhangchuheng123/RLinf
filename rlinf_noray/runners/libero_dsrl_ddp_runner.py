@@ -34,6 +34,7 @@ class Transition:
     effective: bool = False
     returns: float = 0.0
     advantage: float = 0.0
+    advantage_raw: float = 0.0
     value_target: float = 0.0
     debug_frames: list[np.ndarray] | None = None
 
@@ -180,6 +181,7 @@ class ReplayBuffer:
             transition.effective = False
             transition.returns = 0.0
             transition.advantage = 0.0
+            transition.advantage_raw = 0.0
             transition.value_target = 0.0
 
             self._append_entry(transition)
@@ -235,6 +237,7 @@ class ReplayBuffer:
                     - entry.value_target
                 )
                 gae = delta + gamma * gae_lambda * done_mask * gae
+                entry.advantage_raw = gae
                 entry.advantage = gae
                 entry.value_target = gae + entry.value_target
 
@@ -596,21 +599,31 @@ class LiberoDSRLDDPNoRayRunner:
         self.max_log_ratio = float(cfg.algorithm.dsrl_max_log_ratio)
         self.entropy_coef = float(cfg.algorithm.dsrl_entropy_coef)
         self.grad_clip = float(cfg.actor.optim.clip_grad)
-        self.minibatch_size = int(cfg.algorithm.dsrl_minibatch_size)
+        self.global_minibatch_size = int(cfg.algorithm.dsrl_minibatch_size)
         replay_capacity_in_epoch = float(cfg.algorithm.dsrl_replay_buffer_capacity_in_epoch)
         assert replay_capacity_in_epoch > 0.0, (
             "algorithm.dsrl_replay_buffer_capacity_in_epoch must be > 0, "
             f"got {replay_capacity_in_epoch}"
         )
 
-        transitions_per_epoch = self.local_num_envs * self.rollout_epoch * self.chunk_steps
-        replay_capacity = int(math.ceil(transitions_per_epoch * replay_capacity_in_epoch))
+        assert self.global_minibatch_size > 0, (
+            "algorithm.dsrl_minibatch_size must be > 0, "
+            f"got {self.global_minibatch_size}"
+        )
+        assert self.global_minibatch_size % self.world_size == 0, (
+            "algorithm.dsrl_minibatch_size is interpreted as a global PPO minibatch size and "
+            f"must be divisible by world_size={self.world_size}, got {self.global_minibatch_size}"
+        )
+        self.local_minibatch_size = self.global_minibatch_size // self.world_size
+
+        local_transitions_per_epoch = self.local_num_envs * self.rollout_epoch * self.chunk_steps
+        global_transitions_per_epoch = local_transitions_per_epoch * self.world_size
+        replay_capacity = int(math.ceil(local_transitions_per_epoch * replay_capacity_in_epoch))
         # ReplayBuffer requires capacity divisible by num_envs; round up to preserve requested horizon.
         if replay_capacity % self.local_num_envs != 0:
             replay_capacity = (
                 (replay_capacity + self.local_num_envs - 1) // self.local_num_envs
             ) * self.local_num_envs
-        assert self.minibatch_size > 0, f"algorithm.dsrl_minibatch_size must be > 0, got {self.minibatch_size}"
         self.debug_replay_buffer_returns = os.getenv("DEBUG_REPLAY_BUFFER_RETURNS") is not None
         self.debug_value_only = os.getenv("DEBUG_VALUE_ONLY") is not None
         self._ref_value_running_mean = 0.0
@@ -655,10 +668,13 @@ class LiberoDSRLDDPNoRayRunner:
                 "max_log_ratio": self.max_log_ratio,
                 "entropy_coef": self.entropy_coef,
                 "grad_clip": self.grad_clip,
-                "minibatch_size": self.minibatch_size,
+                "global_minibatch_size": self.global_minibatch_size,
+                "local_minibatch_size": self.local_minibatch_size,
                 "replay_capacity_in_epoch": replay_capacity_in_epoch,
-                "transitions_per_epoch": transitions_per_epoch,
+                "global_transitions_per_epoch": global_transitions_per_epoch,
+                "local_transitions_per_epoch": local_transitions_per_epoch,
                 "replay_capacity": replay_capacity,
+                "world_size": self.world_size,
                 "policy_noise_eps": self.policy_noise_eps,
                 "policy_noise_scale": self.policy_noise_scale,
                 "policy_noise_bias": self.policy_noise_bias,
@@ -1107,12 +1123,25 @@ class LiberoDSRLDDPNoRayRunner:
 
         metrics_acc = {
             "ppo_loss": 0.0,
+            "approx_kl": 0.0,
             "value_loss": 0.0,
             "value_mse": 0.0,
             "ref_value_loss": 0.0,
             "entropy": 0.0,
             "ratio": 0.0,
+            "ratio_std": 0.0,
+            "log_ratio_mean": 0.0,
+            "old_logprob_mean": 0.0,
+            "new_logprob_mean": 0.0,
             "clip_fraction": 0.0,
+            "advantage_raw_mean": 0.0,
+            "advantage_raw_std": 0.0,
+            "advantage_raw_abs_mean": 0.0,
+            "advantage_raw_min": 0.0,
+            "advantage_raw_max": 0.0,
+            "advantage_pos_frac": 0.0,
+            "actor_grad_norm": 0.0,
+            "value_grad_norm": 0.0,
             "value_pred_mean": 0.0,
             "value_pred_min": 0.0,
             "value_pred_max": 0.0,
@@ -1132,7 +1161,7 @@ class LiberoDSRLDDPNoRayRunner:
 
         # Optional value-only pre-updates before each standard PPO update block.
         for _ in range(self.pre_value_update_epoch):
-            batch = self.replay_buffer.sample(self.minibatch_size)
+            batch = self.replay_buffer.sample(self.local_minibatch_size)
             states = torch.stack([transition.state for transition in batch], dim=0).to(self.device)
             returns = torch.tensor(
                 [transition.returns for transition in batch],
@@ -1147,7 +1176,7 @@ class LiberoDSRLDDPNoRayRunner:
             self.value_optimizer.step()
 
         for update_idx in range(self.update_epoch):
-            batch = self.replay_buffer.sample(self.minibatch_size)
+            batch = self.replay_buffer.sample(self.local_minibatch_size)
 
             states = torch.stack([transition.state for transition in batch], dim=0).to(self.device)
             actions = torch.stack([transition.action for transition in batch], dim=0).to(self.device)
@@ -1158,6 +1187,11 @@ class LiberoDSRLDDPNoRayRunner:
             )
             advantages = torch.tensor(
                 [transition.advantage for transition in batch],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            raw_advantages = torch.tensor(
+                [transition.advantage_raw for transition in batch],
                 dtype=torch.float32,
                 device=self.device,
             )
@@ -1188,6 +1222,7 @@ class LiberoDSRLDDPNoRayRunner:
             )
             ratio = torch.exp(log_ratio)
             clipped_ratio = torch.clamp(ratio, 1.0 - self.ppo_clip, 1.0 + self.ppo_clip)
+            approx_kl = ((ratio - 1.0) - log_ratio).mean()
             clip_fraction = (
                 torch.logical_or(ratio > (1.0 + self.ppo_clip), ratio < (1.0 - self.ppo_clip))
                 .float()
@@ -1214,24 +1249,44 @@ class LiberoDSRLDDPNoRayRunner:
 
             total_actor_loss = policy_loss + entropy_loss
 
+            actor_grad_norm = 0.0
             if not self.debug_value_only:
                 self.actor_optimizer.zero_grad(set_to_none=True)
                 total_actor_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip)
+                actor_grad_norm = float(
+                    torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip).item()
+                )
                 self.actor_optimizer.step()
 
             self.value_optimizer.zero_grad(set_to_none=True)
             value_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.value_net.parameters(), self.grad_clip)
+            value_grad_norm = float(
+                torch.nn.utils.clip_grad_norm_(self.value_net.parameters(), self.grad_clip).item()
+            )
             self.value_optimizer.step()
 
             metrics_acc["ppo_loss"] += float(policy_loss.detach().item())
+            metrics_acc["approx_kl"] += float(approx_kl.detach().item())
             metrics_acc["value_loss"] += float(value_loss.detach().item())
             metrics_acc["value_mse"] += float(value_mse.detach().item())
             metrics_acc["ref_value_loss"] += float(ref_value_loss.detach().item())
             metrics_acc["entropy"] += float(entropy.detach().mean().item())
             metrics_acc["ratio"] += float(ratio.detach().mean().item())
+            metrics_acc["ratio_std"] += float(ratio.detach().std(unbiased=False).item())
+            metrics_acc["log_ratio_mean"] += float(log_ratio.detach().mean().item())
+            metrics_acc["old_logprob_mean"] += float(old_logprobs.detach().mean().item())
+            metrics_acc["new_logprob_mean"] += float(new_logprobs.detach().mean().item())
             metrics_acc["clip_fraction"] += float(clip_fraction.detach().item())
+            metrics_acc["advantage_raw_mean"] += float(raw_advantages.detach().mean().item())
+            metrics_acc["advantage_raw_std"] += float(raw_advantages.detach().std(unbiased=False).item())
+            metrics_acc["advantage_raw_abs_mean"] += float(raw_advantages.detach().abs().mean().item())
+            metrics_acc["advantage_raw_min"] += float(raw_advantages.detach().min().item())
+            metrics_acc["advantage_raw_max"] += float(raw_advantages.detach().max().item())
+            metrics_acc["advantage_pos_frac"] += float(
+                (raw_advantages.detach() > 0.0).float().mean().item()
+            )
+            metrics_acc["actor_grad_norm"] += actor_grad_norm
+            metrics_acc["value_grad_norm"] += value_grad_norm
             metrics_acc["value_pred_mean"] += float(value_pred.detach().mean().item())
             metrics_acc["value_pred_min"] += float(value_pred.detach().min().item())
             metrics_acc["value_pred_max"] += float(value_pred.detach().max().item())
@@ -1339,7 +1394,11 @@ class LiberoDSRLDDPNoRayRunner:
                         f"target=[{ppo_metrics['value_target_min']:.4f},{ppo_metrics['value_target_max']:.4f}] "
                         f"pred=[{ppo_metrics['value_pred_min']:.4f},{ppo_metrics['value_pred_max']:.4f}] "
                         f"target_oob={ppo_metrics['value_target_oob_frac']:.4f} "
+                        f"adv_abs={ppo_metrics['advantage_raw_abs_mean']:.4f} "
+                        f"approx_kl={ppo_metrics['approx_kl']:.6f} "
                         f"clip_frac={ppo_metrics['clip_fraction']:.4f} "
+                        f"actor_gn={ppo_metrics['actor_grad_norm']:.4f} "
+                        f"value_gn={ppo_metrics['value_grad_norm']:.4f} "
                         f"noise_mean={rollout_metrics['noise_latent_mean']:.4f} "
                         f"noise_std={rollout_metrics['noise_latent_std']:.4f} "
                         f"actor_mean={rollout_metrics['actor_mean_mean']:.4f} "
