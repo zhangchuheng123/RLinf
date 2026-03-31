@@ -310,3 +310,11 @@ for i in reversed(range(batch_size)):
 # Q19
 
 1）修复使用 MC returns 做训练，保留 value_target 的计算，但是最后学习的时候使用 returns；2）监测 update_epoch 第一轮时的 ratio，该 ratio 应该接近 1（当 replay buffer 不复用上一轮样本的时候应该为 1）；3）在配置中先关闭 entropy loss。列出更为详细一点的改动计划，然后进行改动。
+
+# Q20
+
+请先帮我写一份 AGENTS.md 文档，用于给 agent 来读取，方便它了解本工作目录的主要使用方法。包括，1）本项目的主要目标：在 LIBERO 环境上调试成功强化学习算法，实现一个样本效率和计算效率都比较高的强化学习算法；2）本项目的工作目录结构：主要是 lerobot 会作为参考和引用，rlinf/ 是原始目录，仅作参考；rlinf_noray/ 是主要的工作目录，程序的主入口目前是 examples/embodiment/run_libero_dsrl_smolvla_noray.sh，环境的配置方案是 requirements/setup.sh；3）本项目目前的状态：需要把 DSRL 调通，在单一任务上能做到 100% 的准确率。
+
+# Q21
+
+请帮我继续 debug 和调参这个 DSRL 的代码，程序主入口是 examples/embodiment/run_libero_dsrl_smolvla_noray.sh。现在的症状是 value_loss 似乎没有特别地下降，success_rate 上涨了一些，但是稳定在 40% 的准确率学不动了。
