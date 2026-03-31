@@ -36,6 +36,8 @@ The actual environment setup path in this repository is:
 bash requirements/install.sh embodied --model smolvla --env maniskill_libero
 ```
 
+All direct Python, `torchrun`, and debugging commands should use the repository-local `.venv` environment. Prefer `.venv/bin/python` and `.venv/bin/torchrun` for manual runs; the managed shell entrypoints already wire `.venv` in.
+
 ## Canonical Run Entry
 
 The main DSRL entrypoint for this workspace is:
@@ -52,6 +54,15 @@ DISABLE_WANDB=1 SAVE_ROLLOUT_VIDEO=1 bash examples/embodiment/run_libero_dsrl_sm
 ```
 
 The shell script already configures the common runtime environment, including `MUJOCO_GL=egl`, `PYOPENGL_PLATFORM=egl`, `PYTHONPATH`, the local `.venv`, and Hydra overrides.
+
+## Current DSRL Conventions
+
+For the current DSRL debugging phase, use these conventions unless the user explicitly asks to change them:
+
+- `algorithm.gamma` is intended as a chunk-level discount factor. When discussing the runner logic, treat it as `chunk_gamma` to avoid confusing it with per-env-step discounting.
+- The current phase intentionally fixes critic training to Monte Carlo returns. This is not the most sample-efficient choice, but it is the current stability-first baseline and should not be optimized away casually.
+- `pre_value_update_epoch` is intentionally applied every training epoch as extra value-only updates before the standard PPO update block. The older “warmup” wording is misleading; the current behavior is by design.
+- The first-stage goal is to make DSRL reliably work on the single-task LIBERO target before chasing efficiency improvements.
 
 ## Main Code Paths
 

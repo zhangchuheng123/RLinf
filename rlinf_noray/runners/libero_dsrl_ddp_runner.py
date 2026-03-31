@@ -286,15 +286,33 @@ class RunningNorm:
         return (x.float() - mean) / std
 
 
+def _build_value_mlp(
+    input_dim: int,
+    hidden_dim: int,
+    output_dim: int,
+    num_layers: int,
+) -> torch.nn.Sequential:
+    if num_layers <= 0:
+        raise ValueError(f"num_layers must be > 0, got {num_layers}")
+
+    layers: list[torch.nn.Module] = []
+    current_dim = input_dim
+    for _ in range(num_layers):
+        layers.append(torch.nn.Linear(current_dim, hidden_dim))
+        layers.append(torch.nn.ReLU())
+        current_dim = hidden_dim
+    layers.append(torch.nn.Linear(current_dim, output_dim))
+    return torch.nn.Sequential(*layers)
+
+
 class DSRLScalarValueNet(torch.nn.Module):
-    def __init__(self, state_dim: int, hidden_dim: int = 256):
+    def __init__(self, state_dim: int, hidden_dim: int = 256, num_layers: int = 2):
         super().__init__()
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(state_dim, hidden_dim),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_dim, hidden_dim),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_dim, 1),
+        self.net = _build_value_mlp(
+            input_dim=state_dim,
+            hidden_dim=hidden_dim,
+            output_dim=1,
+            num_layers=num_layers,
         )
 
     def forward(self, states: torch.Tensor) -> torch.Tensor:
@@ -322,6 +340,7 @@ class DSRLDistributionalValueNet(torch.nn.Module):
         self,
         state_dim: int,
         hidden_dim: int = 256,
+        num_layers: int = 2,
         v_min: float = 0.0,
         v_max: float = 1.0,
         n_bins: int = 16,
@@ -335,12 +354,11 @@ class DSRLDistributionalValueNet(torch.nn.Module):
         self.v_min = float(v_min)
         self.v_max = float(v_max)
         self.n_bins = int(n_bins)
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(state_dim, hidden_dim),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_dim, hidden_dim),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_dim, n_bins),
+        self.net = _build_value_mlp(
+            input_dim=state_dim,
+            hidden_dim=hidden_dim,
+            output_dim=n_bins,
+            num_layers=num_layers,
         )
         self.register_buffer(
             "bin_centers",
@@ -521,6 +539,16 @@ class LiberoDSRLDDPNoRayRunner:
         self.max_action_dim = int(self.generator.policy.config.max_action_dim)
         self.dsrl_noise_dim = self.chunk_size * self.max_action_dim
         self.dsrl_hidden_dim = int(cfg.actor.model.dsrl_hidden_dim)
+        self.dsrl_actor_num_layers = int(cfg.actor.model.dsrl_actor_num_layers)
+        self.dsrl_value_num_layers = int(cfg.actor.model.dsrl_value_num_layers)
+        if self.dsrl_actor_num_layers <= 0:
+            raise ValueError(
+                f"actor.model.dsrl_actor_num_layers must be > 0, got {self.dsrl_actor_num_layers}"
+            )
+        if self.dsrl_value_num_layers <= 0:
+            raise ValueError(
+                f"actor.model.dsrl_value_num_layers must be > 0, got {self.dsrl_value_num_layers}"
+            )
         self.dsrl_value_head_type = str(cfg.actor.model.get("dsrl_value_head_type", "scalar")).lower()
         self.dsrl_value_v_min = float(cfg.actor.model.get("dsrl_value_v_min", 0.0))
         self.dsrl_value_v_max = float(cfg.actor.model.get("dsrl_value_v_max", 1.0))
@@ -543,18 +571,20 @@ class LiberoDSRLDDPNoRayRunner:
         self.actor = GaussianPolicy(
             input_dim=self.state_dim,
             output_dim=self.dsrl_noise_dim,
-            hidden_dims=(self.dsrl_hidden_dim, self.dsrl_hidden_dim, self.dsrl_hidden_dim),
+            hidden_dims=tuple(self.dsrl_hidden_dim for _ in range(self.dsrl_actor_num_layers)),
             action_horizon=1,
         )
         if self.dsrl_value_head_type == "scalar":
             self.value_net = DSRLScalarValueNet(
                 self.state_dim,
                 hidden_dim=self.dsrl_hidden_dim,
+                num_layers=self.dsrl_value_num_layers,
             )
         elif self.dsrl_value_head_type == "distributional":
             self.value_net = DSRLDistributionalValueNet(
                 self.state_dim,
                 hidden_dim=self.dsrl_hidden_dim,
+                num_layers=self.dsrl_value_num_layers,
                 v_min=self.dsrl_value_v_min,
                 v_max=self.dsrl_value_v_max,
                 n_bins=self.dsrl_value_n_bins,
@@ -593,7 +623,7 @@ class LiberoDSRLDDPNoRayRunner:
             weight_decay=float(cfg.actor.optim.weight_decay),
         )
 
-        self.gamma = float(cfg.algorithm.gamma)
+        self.chunk_gamma = float(cfg.algorithm.gamma)
         self.gae_lambda = float(cfg.algorithm.gae_lambda)
         self.ppo_clip = float(cfg.algorithm.dsrl_ppo_clip)
         self.max_log_ratio = float(cfg.algorithm.dsrl_max_log_ratio)
@@ -656,13 +686,15 @@ class LiberoDSRLDDPNoRayRunner:
                 "state_dim": self.state_dim,
                 "dsrl_noise_dim": self.dsrl_noise_dim,
                 "dsrl_hidden_dim": self.dsrl_hidden_dim,
+                "dsrl_actor_num_layers": self.dsrl_actor_num_layers,
+                "dsrl_value_num_layers": self.dsrl_value_num_layers,
                 "dsrl_value_head_type": self.dsrl_value_head_type,
                 "dsrl_value_v_min": self.dsrl_value_v_min,
                 "dsrl_value_v_max": self.dsrl_value_v_max,
                 "dsrl_value_n_bins": self.dsrl_value_n_bins,
                 "actor_lr": actor_lr,
                 "value_lr": value_lr,
-                "gamma": self.gamma,
+                "chunk_gamma": self.chunk_gamma,
                 "gae_lambda": self.gae_lambda,
                 "ppo_clip": self.ppo_clip,
                 "max_log_ratio": self.max_log_ratio,
@@ -1098,10 +1130,10 @@ class LiberoDSRLDDPNoRayRunner:
             not_done = 1.0 - dones_env_time[:, step_idx]
             delta = (
                 rewards_env_time[:, step_idx]
-                + self.gamma * next_values_env_time[:, step_idx] * not_done
+                + self.chunk_gamma * next_values_env_time[:, step_idx] * not_done
                 - values_env_time[:, step_idx]
             )
-            gae = delta + self.gamma * self.gae_lambda * not_done * gae
+            gae = delta + self.chunk_gamma * self.gae_lambda * not_done * gae
             advantages_env_time[:, step_idx] = gae
 
         returns_env_time = advantages_env_time + values_env_time
@@ -1115,7 +1147,7 @@ class LiberoDSRLDDPNoRayRunner:
         effective_count = self.replay_buffer.prepare_gae_targets(
             value_model=self.value_net,
             device=self.device,
-            gamma=self.gamma,
+            gamma=self.chunk_gamma,
             gae_lambda=self.gae_lambda,
         )
         if effective_count == 0:
@@ -1348,7 +1380,7 @@ class LiberoDSRLDDPNoRayRunner:
                 mode="train",
             )
 
-            self.replay_buffer.add_rollout(transitions, gamma=self.gamma)
+            self.replay_buffer.add_rollout(transitions, gamma=self.chunk_gamma)
             rollout_metrics["recent_success"] = self.replay_buffer.recent_success_rate()
             if self.debug_replay_buffer_returns:
                 self.replay_buffer.save_video()

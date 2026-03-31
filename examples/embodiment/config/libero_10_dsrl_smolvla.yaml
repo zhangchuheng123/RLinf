@@ -140,6 +140,8 @@ actor:
     wrist_image_env_key: "wrist_images" # Env observation key for the wrist camera.
     dsrl_noise_dim: 1600 # DSRL latent noise dimension (must match chunk_size*max_action_dim).
     dsrl_hidden_dim: 256 # Hidden size of DSRL Gaussian actor/value MLP.
+    dsrl_actor_num_layers: 3 # Number of hidden layers in the DSRL actor MLP.
+    dsrl_value_num_layers: 2 # Number of hidden layers in the DSRL value MLP.
     dsrl_value_head_type: scalar # Value head type: scalar or distributional.
     dsrl_value_v_min: 0.0 # Distributional value support lower bound when distributional head is enabled.
     dsrl_value_v_max: 1.0 # Distributional value support upper bound when distributional head is enabled.

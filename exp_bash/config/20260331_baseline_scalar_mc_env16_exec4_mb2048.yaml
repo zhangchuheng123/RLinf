@@ -131,6 +131,8 @@ actor:
     wrist_image_env_key: wrist_images
     dsrl_noise_dim: 1600
     dsrl_hidden_dim: 256
+    dsrl_actor_num_layers: 3
+    dsrl_value_num_layers: 2
     dsrl_value_head_type: scalar
     dsrl_value_v_min: 0.0
     dsrl_value_v_max: 1.0

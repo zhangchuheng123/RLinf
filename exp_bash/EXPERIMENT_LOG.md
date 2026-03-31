@@ -14,14 +14,8 @@
 - Goal: reproduce the current scalar MC baseline with explicit global algorithm settings so it can be rerun on different machines from `exp_bash/` alone.
 - Changed vs previous baseline: no algorithm change; copied the launch path and config into `exp_bash/` so the experiment is self-contained.
 
-### 20260331_actorlr2e5_scalar_mc_env16_exec4_mb2048.sh
+### 20260331_scalar_mc_env16_exec4_mb2048_increase_net.sh
 
-- Background: current best run improves but does not reach stable repeated high eval success.
-- Goal: strengthen actor learning while keeping value learning ahead and unchanged, using a self-contained experiment package.
-- Changed vs baseline: increase actor LR from `1e-5` to `2e-5`; keep value LR at `1e-4` and keep the rest of the global algorithm settings fixed.
-
-### 20260331_actorlr2e5_valuelr15e4_scalar_mc_env16_exec4_mb2048.sh
-
-- Background: actor learning may be too weak, but value-first learning remains important.
-- Goal: test whether increasing both actor and value learning rates can improve policy learning while preserving the value-first training pattern, using a self-contained experiment package.
-- Changed vs baseline: increase actor LR to `2e-5` and value LR to `1.5e-4`; keep the rest of the global algorithm settings fixed.
+- Background: current baseline may be limited more by DSRL actor/value network capacity than by learning-rate choice.
+- Goal: test a larger DSRL MLP while keeping the scalar MC training setup unchanged.
+- Changed vs baseline: increase `dsrl_hidden_dim` from `256` to `512`; increase actor hidden-layer count from `3` to `4`; increase value hidden-layer count from `2` to `4`; keep actor/value learning rates and the rest of the global algorithm settings fixed.

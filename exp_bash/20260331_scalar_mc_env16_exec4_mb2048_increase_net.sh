@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # Background:
-# - The current best scalar MC run improves, but repeated evaluation success is still unstable.
+# - The current scalar MC baseline can improve, but actor/value capacity may still be too small.
 # Goal:
-# - Increase actor update strength while keeping value learning settings unchanged.
+# - Test a larger DSRL actor/value network while keeping the scalar MC training setup fixed.
 # Changes vs baseline:
-# - Increase actor learning rate from 1e-5 to 2e-5.
-# - Keep the script self-contained and independent from examples/.
+# - Increase `dsrl_hidden_dim` from 256 to 512.
+# - Increase both actor and value MLP depth to 4 hidden layers.
 
 EXP_BASH_PATH="$( cd "$(dirname "${BASH_SOURCE[0]}")" && pwd )"
 REPO_PATH="$(dirname "${EXP_BASH_PATH}")"
@@ -19,7 +19,7 @@ export PYTHONPATH="${REPO_PATH}"
 export UV_PROJECT_ENVIRONMENT="${REPO_PATH}/.venv"
 export EMBODIED_PATH="${EXP_BASH_PATH}"
 
-CONFIG_NAME="20260331_actorlr2e5_scalar_mc_env16_exec4_mb2048"
+CONFIG_NAME="20260331_scalar_mc_env16_exec4_mb2048_increase_net"
 MODEL_PATH="${REPO_PATH}/models/smolvla_libero"
 TRAIN_ENVS=16
 EVAL_ENVS=16

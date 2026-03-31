@@ -17,7 +17,7 @@ runner:
   logger:
     log_path: "../results"
     project_name: rlinf
-    experiment_name: "20260331_actorlr2e5_scalar_mc_env16_exec4_mb2048"
+    experiment_name: "20260331_scalar_mc_env16_exec4_mb2048_increase_net"
     logger_backends: ["tensorboard", "wandb"]
   max_epochs: 1000
   max_steps: -1
@@ -130,7 +130,9 @@ actor:
     main_image_env_key: main_images
     wrist_image_env_key: wrist_images
     dsrl_noise_dim: 1600
-    dsrl_hidden_dim: 256
+    dsrl_hidden_dim: 512
+    dsrl_actor_num_layers: 4
+    dsrl_value_num_layers: 4
     dsrl_value_head_type: scalar
     dsrl_value_v_min: 0.0
     dsrl_value_v_max: 1.0
@@ -140,7 +142,7 @@ actor:
     policy_noise_bias: 0.0
   optim:
     lr: 5.0e-6
-    dsrl_actor_lr: 2.0e-5
+    dsrl_actor_lr: 1.0e-5
     dsrl_value_lr: 1.0e-4
     adam_beta1: 0.9
     adam_beta2: 0.95

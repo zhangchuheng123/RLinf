@@ -29,7 +29,7 @@ WandB analysis:
 1. Summarize all managed `exp_bash/config/*.yaml` runs:
 	`.venv/bin/python exp_bash/fetch_exp_wandb_runs.py`
 2. Summarize one managed experiment with full history:
-	`.venv/bin/python exp_bash/fetch_exp_wandb_runs.py --config-name 20260331_actorlr2e5_scalar_mc_env16_exec4_mb2048 --include-history --output logs/analysis/20260331_actorlr2e5_scalar_mc_env16_exec4_mb2048.json`
+	`.venv/bin/python exp_bash/fetch_exp_wandb_runs.py --config-name 20260331_scalar_mc_env16_exec4_mb2048_increase_net --include-history --output logs/analysis/20260331_scalar_mc_env16_exec4_mb2048_increase_net.json`
 3. Add extra run filters when needed:
 	`.venv/bin/python exp_bash/fetch_exp_wandb_runs.py --name-contains scalar_mc`
 4. If no run has been launched yet for the current `exp_bash/config/*.yaml` names, point the tool at a legacy reference run explicitly:

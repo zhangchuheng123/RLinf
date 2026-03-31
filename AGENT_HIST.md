@@ -122,3 +122,32 @@ Analyze the current DSRL plateau without modifying the training code. Read AGENT
   - explicit validation against legacy run `libero_10_dsrl_smolvla_scalar_ddp16x4_mc` now works and correctly reports recent eval stability summaries plus available rollout/value metrics.
 - Important interpretation note:
   - newly added actor diagnostics such as `train/advantage_raw_abs_mean`, `train/actor_grad_norm`, and `train/approx_kl` can still be missing for old runs that started before those metrics were added to the runner.
+
+### Algorithm Audit Clarification On 2026-03-31
+
+- Re-audited `rlinf_noray/runners/libero_dsrl_ddp_runner.py` because current symptoms suggested actor/value might not be learning the right objective rather than merely needing LR tuning.
+- Confirmed that actor log-probability is internally consistent:
+  - `GaussianPolicy.sample()` logprob,
+  - `GaussianPolicy.evaluate_actions()` logprob,
+  - and `distribution.log_prob()` all match numerically.
+- Reverted an intermediate chunk-discount patch after clarifying the intended design with the user.
+- Current intended DSRL semantics are:
+  - `algorithm.gamma` is chunk-level gamma and should be read as `chunk_gamma` in runner reasoning;
+  - replay-transition rewards stay as chunk reward sums under that chunk-level semantics;
+  - critic training remains fixed to Monte Carlo returns for the current stability-first phase;
+  - `pre_value_update_epoch` intentionally means extra value-only updates every epoch before PPO updates, not a one-time startup warmup.
+- Current next step from this audit is to try larger DSRL actor/value networks rather than further reinterpret the discount semantics.
+
+### Larger DSRL Net Experiment On 2026-03-31
+
+- Updated the no-ray DSRL runner so actor/value MLP depth is configurable through config instead of being hard-coded.
+- Added explicit baseline config fields for:
+  - `actor.model.dsrl_actor_num_layers = 3`
+  - `actor.model.dsrl_value_num_layers = 2`
+- Replaced the non-baseline `exp_bash/` 20260331 experiment variants with a single network-capacity experiment bundle:
+  - `exp_bash/20260331_scalar_mc_env16_exec4_mb2048_increase_net.sh`
+  - `exp_bash/config/20260331_scalar_mc_env16_exec4_mb2048_increase_net.yaml`
+- The new managed experiment keeps the scalar MC baseline algorithm fixed and changes only DSRL network capacity:
+  - `dsrl_hidden_dim = 512`
+  - actor hidden layers: `3 -> 4`
+  - value hidden layers: `2 -> 4`
