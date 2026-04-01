@@ -243,3 +243,14 @@ Analyze the current DSRL plateau without modifying the training code. Read AGENT
     - `algorithm.advantage_clip: 3.0`
 
 - Updated experiment notes in `exp_bash/EXPERIMENT_LOG.md` to match the final experiment definition.
+
+### Workspace Sync Operation On 2026-04-01
+
+- Cloned target repository under home path:
+  - `~/eai-sim-rl` (SSH remote: `git@github.com:zhangchuheng123/eai-sim-rl.git`)
+- Copied current workspace content from `~/RLinf/` into `~/eai-sim-rl/` using `rsync` with explicit exclusions.
+- Excluded from copy:
+  - git history from source: `.git/`
+  - top-level directories: `examples/`, `docs/`, `docker/`, `logs/`, `ray_utils/`, `rlinf/`
+  - log files: `*.log`
+- Verified target remains a valid git work tree after sync.
