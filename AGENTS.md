@@ -2,7 +2,7 @@
 
 ## Read This First
 
-This repository is currently being used to debug and improve embodied reinforcement learning on LIBERO. Before making changes, read `CODEX.md` for the latest task history, debugging constraints, and temporary workflows that are still in active use.
+This repository is currently being used to debug and improve embodied reinforcement learning on LIBERO. Before making changes, read `AGENT_HIST.md` (also `HUMAN_CODEX.md`) for the latest task history, debugging constraints, and temporary workflows that are still in active use.
 
 ## Project Goal
 
@@ -21,12 +21,12 @@ Use the repository with these boundaries in mind:
 - `rlinf_noray/` is the primary implementation directory. New logic and bug fixes should go here unless there is a strong reason otherwise.
 - `lerobot/` is a reference and alignment directory. It is useful for comparing preprocessing, postprocessing, rollout, and normalization behavior. Keep edits minimal.
 - `rlinf/` is the original reference directory. Do not use it as the primary place for new work.
-- `examples/embodiment/` contains the main runnable shell entrypoints and Hydra configs for this embodied workflow.
+- `examples/embodiment/` contains the previous main runnable shell entrypoints and Hydra configs for this embodied workflow; now, it is out dated, use exp_bash instead. Do not use it as the primary place for new work.
 - `exp_bash/` stores managed experiment launch scripts, copied configs, lightweight launch entrypoints, and experiment-specific analysis tools such as WandB fetch scripts. Keep experiment workflows as self-contained as practical because `examples/` is expected to be removed later.
 - `models/` stores downloaded model checkpoints, including the local SmolVLA LIBERO model used by the current scripts.
 - `requirements/` contains environment setup scripts.
 
-For this project, assume that future work should converge into `rlinf_noray/`, not into `lerobot/` or `rlinf/`.
+For this project, assume that future work should converge into `rlinf_noray/`, not into `rlinf/` (any time) or `lerobot/` (recommend).
 
 ## Canonical Setup
 
@@ -110,6 +110,15 @@ When choosing what to work on next, prioritize DSRL training dynamics, rollout c
 ## Metric Guide
 
 Use the currently best run `libero_10_dsrl_smolvla_scalar_ddp16x4_mc` as the main reference when interpreting metrics.
+
+### Trend Analysis Protocol (Required)
+
+When analyzing experiment curves (especially from WandB), use the following process by default to reduce random fluctuations:
+
+- First smooth each metric with a moving average.
+- Then sample 5 evenly spaced points from the smoothed curve (including beginning and end).
+- Use these 5 sampled values as the primary trend evidence before drawing conclusions.
+- If a conclusion depends on short-window volatility, state that explicitly as lower-confidence.
 
 ### Core Metrics
 

@@ -202,6 +202,9 @@ class ReplayBuffer:
         device: torch.device,
         gamma: float,
         gae_lambda: float,
+        do_adv_norm: bool,
+        adv_norm_eps: float,
+        advantage_clip: float,
     ) -> int:
         effective_entries = self._effective_entries()
         if not effective_entries:
@@ -241,14 +244,18 @@ class ReplayBuffer:
                 entry.advantage = gae
                 entry.value_target = gae + entry.value_target
 
-        advantages = torch.tensor(
-            [entry.advantage for entry in effective_entries], dtype=torch.float32
-        )
-        mean = float(advantages.mean().item())
-        std = float(advantages.std(unbiased=False).item())
-        denom = max(std, 1e-6)
-        for entry in effective_entries:
-            entry.advantage = (entry.advantage - mean) / denom
+        if do_adv_norm:
+            advantages = torch.tensor(
+                [entry.advantage for entry in effective_entries], dtype=torch.float32
+            )
+            mean = float(advantages.mean().item())
+            std = float(advantages.std(unbiased=False).item())
+            denom = std + adv_norm_eps
+            for entry in effective_entries:
+                normalized_adv = (entry.advantage - mean) / denom
+                entry.advantage = float(
+                    np.clip(normalized_adv, -advantage_clip, advantage_clip)
+                )
 
         return len(effective_entries)
 
@@ -630,6 +637,17 @@ class LiberoDSRLDDPNoRayRunner:
         self.entropy_coef = float(cfg.algorithm.dsrl_entropy_coef)
         self.grad_clip = float(cfg.actor.optim.clip_grad)
         self.global_minibatch_size = int(cfg.algorithm.dsrl_minibatch_size)
+        self.do_adv_norm = bool(cfg.algorithm.get("do_adv_norm", True))
+        self.adv_norm_eps = float(cfg.algorithm.get("adv_norm_eps", 1.0e-8))
+        self.advantage_clip = float(cfg.algorithm.get("advantage_clip", 3.0))
+        if self.adv_norm_eps <= 0.0:
+            raise ValueError(
+                f"algorithm.adv_norm_eps must be > 0, got {self.adv_norm_eps}"
+            )
+        if self.advantage_clip <= 0.0:
+            raise ValueError(
+                f"algorithm.advantage_clip must be > 0, got {self.advantage_clip}"
+            )
         replay_capacity_in_epoch = float(cfg.algorithm.dsrl_replay_buffer_capacity_in_epoch)
         assert replay_capacity_in_epoch > 0.0, (
             "algorithm.dsrl_replay_buffer_capacity_in_epoch must be > 0, "
@@ -702,6 +720,9 @@ class LiberoDSRLDDPNoRayRunner:
                 "grad_clip": self.grad_clip,
                 "global_minibatch_size": self.global_minibatch_size,
                 "local_minibatch_size": self.local_minibatch_size,
+                "do_adv_norm": self.do_adv_norm,
+                "adv_norm_eps": self.adv_norm_eps,
+                "advantage_clip": self.advantage_clip,
                 "replay_capacity_in_epoch": replay_capacity_in_epoch,
                 "global_transitions_per_epoch": global_transitions_per_epoch,
                 "local_transitions_per_epoch": local_transitions_per_epoch,
@@ -934,8 +955,9 @@ class LiberoDSRLDDPNoRayRunner:
         if save_video:
             video_buffers = self._init_video_buffers(env.num_envs)
 
-        stats = torch.zeros(4, dtype=torch.float64)
-        # [return_sum, step_count, done_count, success_count]
+        stats = torch.zeros(5, dtype=torch.float64)
+        # [return_sum, step_count_running, done_count, success_count, done_length_sum]
+        episode_steps_by_env = torch.zeros(env.num_envs, dtype=torch.int64)
         noise_sum = 0.0
         noise_sq_sum = 0.0
         noise_count = 0
@@ -996,16 +1018,33 @@ class LiberoDSRLDDPNoRayRunner:
                 )
 
             chunk_sum_rewards = chunk_rewards.sum(dim=1).float().cpu()
-            dones = torch.logical_or(chunk_terminations, chunk_truncations).any(dim=1).float().cpu()
+            done_events = torch.logical_or(chunk_terminations, chunk_truncations)
+            dones = done_events.any(dim=1).float().cpu()
             success = torch.logical_and(
                 chunk_terminations.any(dim=1),
                 torch.logical_not(chunk_truncations.any(dim=1)),
             ).float().cpu()
 
+            # Count only actually executed sub-steps in this chunk.
+            # With done-in-chunk skipping, trailing skipped steps should not contribute to length stats.
+            done_int = done_events.to(dtype=torch.int64)
+            first_done_idx = torch.argmax(done_int, dim=1)
+            executed_steps = torch.where(
+                done_events.any(dim=1),
+                first_done_idx + 1,
+                torch.full_like(first_done_idx, fill_value=done_events.shape[1]),
+            )
+            episode_steps_by_env += executed_steps
+
+            done_mask = done_events.any(dim=1)
+            done_length_sum = int(episode_steps_by_env[done_mask].sum().item())
+            episode_steps_by_env[done_mask] = 0
+
             stats[0] += float(chunk_sum_rewards.sum().item())
-            stats[1] += float(chunk_rewards.numel())
+            stats[1] += float(executed_steps.sum().item())
             stats[2] += float(dones.sum().item())
             stats[3] += float(success.sum().item())
+            stats[4] += float(done_length_sum)
 
             noise_sum += float(noise_latent.sum().item())
             noise_sq_sum += float((noise_latent * noise_latent).sum().item())
@@ -1089,6 +1128,7 @@ class LiberoDSRLDDPNoRayRunner:
             "return_per_step": float(stats[0].item() / step_count),
             "return_per_traj_running": float(stats[0].item() / done_count),
             "average_length_running": float(stats[1].item() / done_count),
+            "average_length": float(stats[4].item() / done_count),
             "success_rate": float(stats[3].item() / done_count),
             "total_trajectories": float(stats[2].item()),
             "success_trajectories": float(stats[3].item()),
@@ -1149,6 +1189,9 @@ class LiberoDSRLDDPNoRayRunner:
             device=self.device,
             gamma=self.chunk_gamma,
             gae_lambda=self.gae_lambda,
+            do_adv_norm=self.do_adv_norm,
+            adv_norm_eps=self.adv_norm_eps,
+            advantage_clip=self.advantage_clip,
         )
         if effective_count == 0:
             return {}
@@ -1172,6 +1215,9 @@ class LiberoDSRLDDPNoRayRunner:
             "advantage_raw_min": 0.0,
             "advantage_raw_max": 0.0,
             "advantage_pos_frac": 0.0,
+            "advantage_mean": 0.0,
+            "advantage_std": 0.0,
+            "advantage_abs_mean": 0.0,
             "actor_grad_norm": 0.0,
             "value_grad_norm": 0.0,
             "value_pred_mean": 0.0,
@@ -1317,6 +1363,9 @@ class LiberoDSRLDDPNoRayRunner:
             metrics_acc["advantage_pos_frac"] += float(
                 (raw_advantages.detach() > 0.0).float().mean().item()
             )
+            metrics_acc["advantage_mean"] += float(advantages.detach().mean().item())
+            metrics_acc["advantage_std"] += float(advantages.detach().std(unbiased=False).item())
+            metrics_acc["advantage_abs_mean"] += float(advantages.detach().abs().mean().item())
             metrics_acc["actor_grad_norm"] += actor_grad_norm
             metrics_acc["value_grad_norm"] += value_grad_norm
             metrics_acc["value_pred_mean"] += float(value_pred.detach().mean().item())
@@ -1397,6 +1446,7 @@ class LiberoDSRLDDPNoRayRunner:
                     "rollout/return_per_step": rollout_metrics["return_per_step"],
                     "rollout/return_per_traj_running": rollout_metrics["return_per_traj_running"],
                     "rollout/average_length_running": rollout_metrics["average_length_running"],
+                    "rollout/average_length": rollout_metrics["average_length"],
                     "rollout/success_rate": rollout_metrics["success_rate"],
                     "rollout/total_trajectories": rollout_metrics["total_trajectories"],
                     "rollout/success_trajectories": rollout_metrics["success_trajectories"],

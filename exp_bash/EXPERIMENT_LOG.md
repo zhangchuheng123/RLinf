@@ -19,3 +19,11 @@
 - Background: current baseline may be limited more by DSRL actor/value network capacity than by learning-rate choice.
 - Goal: test a larger DSRL MLP while keeping the scalar MC training setup unchanged.
 - Changed vs baseline: increase `dsrl_hidden_dim` from `256` to `512`; increase actor hidden-layer count from `3` to `4`; increase value hidden-layer count from `2` to `4`; keep actor/value learning rates and the rest of the global algorithm settings fixed.
+
+## 2026-04-01
+
+### 20260401_scalar_mc_env16_exec4_mb2048_increase_actor_lr.sh
+
+- Background: after increase_net, PPO actor updates still appear too conservative (`ratio` near 1 and clipping near 0).
+- Goal: increase actor update strength while keeping the increase_net architecture unchanged, and keep normalized-advantage PPO enabled.
+- Changed vs 20260331 increase_net: increase `actor.optim.dsrl_actor_lr` from `1.0e-5` to `1.0e-4`; keep `actor.optim.dsrl_value_lr=1.0e-4`; set `algorithm.do_adv_norm=true`, `algorithm.adv_norm_eps=1.0e-8`, and `algorithm.advantage_clip=3.0`.

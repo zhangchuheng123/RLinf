@@ -151,3 +151,95 @@ Analyze the current DSRL plateau without modifying the training code. Read AGENT
   - `dsrl_hidden_dim = 512`
   - actor hidden layers: `3 -> 4`
   - value hidden layers: `2 -> 4`
+
+### WandB Comparative Readout On 2026-03-31 (ddp16x4_mc vs increase_net)
+
+- Read `AGENTS.md` first, then fetched WandB directly from `https://microsoft-research.wandb.io`.
+- Pulled latest runs by substring and exported full metric histories to:
+  - `logs/wandb_analysis/latest_ddp16x4_mc_and_increase_net.json`
+  - `logs/wandb_analysis/latest_two_runs_metric_summary.json`
+- Latest matched runs:
+  - `ddp16x4_mc`: `libero_10_dsrl_smolvla_scalar_ddp16x4_mc` (created `2026-03-30T03:00:07Z`, running)
+  - `increase_net`: `20260331_scalar_mc_env16_exec4_mb2048_increase_net` (created `2026-03-31T10:28:42Z`, running)
+- Config delta check confirms `increase_net` only changes DSRL net capacity:
+  - `dsrl_hidden_dim: 256 -> 512`
+  - `dsrl_actor_num_layers: 3 -> 4`
+  - `dsrl_value_num_layers: 2 -> 4`
+- Outcome metrics:
+  - `ddp16x4_mc`: `eval/success_rate` first=0.25, last=0.25, max=1.0, recent20_mean=0.425, full-success frac in recent20=0.0
+  - `increase_net`: `eval/success_rate` first=0.3125, last=0.375, max=0.625, recent20_mean=0.378, full-success frac in recent20=0.0
+  - `rollout/success_rate` improves in both runs but does not translate to stable eval success.
+- Critic metrics remain healthy in both runs:
+  - `train/value_mse` drops (`~0.048 -> ~0.040`), clearly below `train/ref_value_loss` at tail.
+  - `train/value_target_oob_frac` stays `0.0`.
+- Actor-side diagnostics (available in `increase_net`) show update magnitude is extremely small:
+  - `train/ratio ~ 1.0`, `train/ratio_std ~ 3.4e-4`
+  - `train/approx_kl ~ 1e-7`
+  - `train/clip_fraction = 0.0`
+  - Interpretation: PPO updates are too weak to produce robust policy improvement.
+- Advantage/gradient in `increase_net`:
+  - `train/advantage_raw_abs_mean` increases (`0.034 -> 0.091`) and `train/advantage_raw_std` increases.
+  - `train/actor_grad_norm` remains low and nearly flat (`~0.019`).
+  - `train/value_grad_norm` rises strongly (`~0.086 -> ~0.431`).
+  - Interpretation: actor signal exists but effective actor movement is still underpowered versus critic-side adaptation.
+- Main diagnosis now:
+  - The bottleneck is not value fitting; it is actor update strength / PPO step size effectiveness.
+  - Enlarging actor/value networks alone did not fix stability; eval remains far below acceptance (`recent-20 mean >= 0.98`).
+
+### Trend Protocol + Runner Metrics Fix On 2026-03-31
+
+- Recomputed run-trend analysis using a mandatory smoothing protocol:
+  - moving average first,
+  - then 5 evenly spaced sampled points from the smoothed curve (including start/end).
+- Saved structured outputs:
+  - `logs/wandb_analysis/latest_two_runs_moving_average_5pts.json`
+- Updated `AGENTS.md` to include this protocol as a required default under Metric Guide.
+
+- Updated `rlinf_noray/runners/libero_dsrl_ddp_runner.py`:
+  - Added configurable advantage normalization behavior in replay GAE preparation:
+    - `algorithm.do_adv_norm` (default `True`)
+    - `algorithm.adv_norm_eps` (default `1e-8`)
+    - `algorithm.advantage_clip` (default `3.0`)
+  - Added normalized-advantage logging metrics in PPO update:
+    - `train/advantage_mean`
+    - `train/advantage_std`
+    - `train/advantage_abs_mean`
+  - Kept existing raw-advantage metrics for diagnostics.
+  - Fixed rollout/eval length numerator to count only actually executed sub-steps per env inside each chunk,
+    instead of counting skipped trailing steps after `done`.
+  - Added rollout done-reason diagnostics:
+    - `rollout/truncation_trajectories`
+    - `rollout/truncation_rate`
+
+- Updated active managed experiment configs under `exp_bash/config/` to include:
+  - `algorithm.do_adv_norm: true`
+  - `algorithm.adv_norm_eps: 1.0e-8`
+  - `algorithm.advantage_clip: 3.0`
+
+## 2026-04-01
+
+### Final Effective Changes
+
+- Restored past-date experiment configs to keep historical experiments unchanged:
+  - `exp_bash/config/20260331_baseline_scalar_mc_env16_exec4_mb2048.yaml`
+  - `exp_bash/config/20260331_scalar_mc_env16_exec4_mb2048_increase_net.yaml`
+
+- Updated rollout metrics in `rlinf_noray/runners/libero_dsrl_ddp_runner.py`:
+  - removed truncation-specific rollout metrics;
+  - added done-only `rollout/average_length`;
+  - kept `rollout/average_length_running` as running length statistic.
+
+- Kept PPO actor training on normalized advantages (`transition.advantage`) and removed no-op refactor noise.
+
+- Final managed experiment for today:
+  - launcher: `exp_bash/20260401_scalar_mc_env16_exec4_mb2048_increase_actor_lr.sh`
+  - config: `exp_bash/config/20260401_scalar_mc_env16_exec4_mb2048_increase_actor_lr.yaml`
+  - experiment name: `20260401_scalar_mc_env16_exec4_mb2048_increase_actor_lr`
+  - actor LR: `1.0e-4`
+  - value LR: `1.0e-4`
+  - enabled normalized-advantage settings:
+    - `algorithm.do_adv_norm: true`
+    - `algorithm.adv_norm_eps: 1.0e-8`
+    - `algorithm.advantage_clip: 3.0`
+
+- Updated experiment notes in `exp_bash/EXPERIMENT_LOG.md` to match the final experiment definition.
